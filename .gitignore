@@ -1,0 +1,28 @@
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+build/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports & outputs
+out/
+reports/
+*.pdf
+*.json
+
+# IDE
+.vscode/
+.idea/

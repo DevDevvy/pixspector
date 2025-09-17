@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pixspector"
+version = "0.1.0"
+description = "Classical image forensics (no-ML) toolkit: ELA, JPEG ghosts, DCT/Benford, resampling, CFA, PRNU, FFT checks, C2PA/EXIF, rule-based scoring."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+keywords = ["image forensics", "metadata", "c2pa", "jpeg", "ela", "prnu", "digital forensics"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Security :: Cryptography",
+  "Topic :: Scientific/Engineering :: Image Processing"
+]
+
+dependencies = [
+    "numpy==2.2.2",
+    "scipy==1.16.2",
+    "opencv-python==4.12.0.88",
+    "scikit-image==0.25.2",
+    "Pillow==11.3.0",
+    "matplotlib==3.10.6",
+    "typer[all]==0.17.4",
+    "PyYAML==6.0.2",
+    "ExifRead==3.5.1",
+    "rich==14.1.0",
+    "tqdm==4.67.1",
+    "Jinja2==3.1.6",
+    "reportlab==4.4.3"
+]
+
+[project.urls]
+Homepage = "https://example.com/pixspector"
+Repository = "https://example.com/pixspector"
+
+[project.scripts]
+pixspector = "pixspector.cli:app"
