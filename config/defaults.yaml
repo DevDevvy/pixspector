@@ -1,0 +1,80 @@
+# Thresholds & weights for the (no-ML) rule engine and module configs.
+# You can override any field via --config <your.yaml>
+
+app:
+  name: pixspector
+  save_visuals: true
+  max_image_dim: 4096 # images larger than this will be downscaled for analysis (aspect preserved)
+  tile_size: 128 # default tile size for patch-based analyses
+
+rules:
+  # Initial, conservative weights. Tunable.
+  # Positive => adds suspicion, Negative => reduces suspicion
+  weights:
+    ela_strong: 12
+    ela_moderate: 6
+    jpeg_double_misaligned: 15
+    jpeg_double_aligned: 8
+    dct_benford_strong: 10
+    dct_benford_moderate: 5
+    resampling_periodicity_strong: 20
+    resampling_periodicity_moderate: 10
+    cfa_inconsistency_large: 20
+    cfa_inconsistency_small: 8
+    prnu_mismatch: 12
+    fft_periodic_spikes: 10
+    provenance_c2pa_valid: -30
+    provenance_exif_consistent: -5
+
+  # Clamp final score to [0, 100]
+  clamp_min: 0
+  clamp_max: 100
+
+  # Buckets for quick narrative labels (you can tweak)
+  buckets:
+    low:
+      max: 30
+      label: "Low"
+    medium:
+      max: 60
+      label: "Medium"
+    high:
+      max: 100
+      label: "High"
+
+modules:
+  ela:
+    recompress_quality: 90
+    blur_sigma: 0.0
+
+  jpeg_ghosts:
+    q_grid: [60, 70, 80, 85, 90, 95]
+    diff_metric: "l1" # l1 | l2
+    misalign_window: 8
+
+  dct_benford:
+    min_blocks: 256
+    strong_z: 3.0
+    moderate_z: 2.0
+
+  resampling:
+    patch: 128
+    stride: 64
+    radon_angles: 30
+    periodicity_threshold_strong: 0.35
+    periodicity_threshold_moderate: 0.25
+
+  cfa:
+    patch: 64
+    stride: 32
+    inconsistency_threshold_strong: 0.35
+    inconsistency_threshold_moderate: 0.25
+
+  prnu:
+    wavelet_denoise_sigma: 3.0
+    correlate_min_nz: 0.05
+
+  fft_checks:
+    radial_bins: 64
+    peak_prominence: 6.0
+    highfreq_rolloff_warn: 0.75
