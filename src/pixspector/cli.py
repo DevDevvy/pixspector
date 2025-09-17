@@ -13,6 +13,8 @@ from rich.table import Table
 from rich.panel import Panel
 
 from . import __version__
+from .config import Config
+from .pipeline import analyze_single_image
 
 app = typer.Typer(add_completion=False, help="pixspector — classical image forensics (no ML).")
 console = Console()
@@ -31,12 +33,12 @@ def version() -> None:
 @app.command()
 def doctor() -> None:
     """
-    Environment checks: Python, key packages, optional external tools.
-    (This is a stub; future batches will add c2patool checks, etc.)
+    Environment checks (basic).
     """
     table = Table(title="pixspector doctor")
     table.add_column("Check")
     table.add_column("Result")
+
     table.add_row("Python", sys.version.split()[0])
     try:
         import cv2  # noqa
@@ -61,10 +63,16 @@ def analyze(
     no_pdf: bool = typer.Option(False, "--no-pdf", help="Skip PDF generation."),
 ) -> None:
     """
-    Run the classical forensic pipeline on one or many images.
-    (Batch 1: pipeline is stubbed; later batches will fill in modules.)
+    Run the full classical forensic pipeline on one or many images.
     """
     _ensure_outdir(report)
+
+    # Load configuration
+    defaults_path = Path(__file__).resolve().parent.parent.parent / "config" / "defaults.yaml"
+    if not defaults_path.exists():
+        console.print("[red]defaults.yaml not found. Did you create the repo via the bootstrap script?[/]")
+        raise typer.Exit(code=1)
+    cfg = Config.load(defaults_path=defaults_path, override_path=config)
 
     # Expand globs
     paths: List[str] = []
@@ -77,7 +85,12 @@ def analyze(
         console.print("[red]No files matched.[/]")
         raise typer.Exit(code=1)
 
-    results_summary = []
+    table = Table(title="pixspector — results")
+    table.add_column("Image")
+    table.add_column("Suspicion")
+    table.add_column("Bucket")
+    table.add_column("JSON")
+    table.add_column("PDF")
 
     for p in paths:
         pth = Path(p)
@@ -85,38 +98,19 @@ def analyze(
             console.print(f"[yellow]Skip (not a file):[/] {p}")
             continue
 
-        # --- Placeholder: real pipeline will populate this dict in later batches ---
-        result = {
-            "input": str(pth),
-            "status": "ok",
-            "modules": [],
-            "suspicion_index": None,  # filled when rules are implemented
-            "notes": "Analysis stubs; modules will be added in upcoming batches.",
-        }
-        # Save minimal JSON now so the CLI feels complete
-        out_json = report / f"{pth.stem}_report.json"
-        with open(out_json, "w") as f:
-            json.dump(result, f, indent=2)
-
-        results_summary.append((pth.name, result["status"], out_json.name))
-
-    # Pretty print a simple summary table
-    table = Table(title="pixspector — summary")
-    table.add_column("Image")
-    table.add_column("Status")
-    table.add_column("Report JSON")
-    for name, status, json_name in results_summary:
-        table.add_row(name, status, json_name)
+        try:
+            res = analyze_single_image(pth, cfg=cfg, out_dir=report, want_pdf=(not no_pdf))
+            json_name = f"{pth.stem}_report.json"
+            pdf_name = f"{pth.stem}_report.pdf" if not no_pdf else "-"
+            table.add_row(
+                pth.name,
+                str(res.get("suspicion_index", "n/a")),
+                str(res.get("bucket_label", "")),
+                json_name,
+                pdf_name,
+            )
+        except Exception as e:
+            console.print(f"[red]Error analyzing {pth.name}:[/] {e}")
 
     console.print(table)
-
-    if no_pdf:
-        console.print(Panel.fit("PDF output skipped (--no-pdf)."))
-    else:
-        console.print(Panel.fit("PDF generation will be added in the Reporting batch."))
-
     console.print(Panel.fit(f"Artifacts saved to: {report.resolve()}"))
-
-
-if __name__ == "__main__":
-    app()

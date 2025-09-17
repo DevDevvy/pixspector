@@ -32,7 +32,8 @@ dependencies = [
     "rich==14.1.0",
     "tqdm==4.67.1",
     "Jinja2==3.1.6",
-    "reportlab==4.4.3"
+    "reportlab==4.4.3",
+    "PySide6>=6.7" 
 ]
 
 [project.urls]
@@ -41,3 +42,5 @@ Repository = "https://example.com/pixspector"
 
 [project.scripts]
 pixspector = "pixspector.cli:app"
+pixspector-gui = "pixspector.gui.app:main" 
+
