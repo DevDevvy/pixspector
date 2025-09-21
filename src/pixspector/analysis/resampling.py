@@ -68,8 +68,14 @@ def _periodicity_score(patch_gray: np.ndarray) -> float:
     non_dc = spec[1:]
     # score: prominence of the top peak vs. median
     top = float(np.max(non_dc))
-    med = float(np.median(non_dc) + 1e-6)
-    score = (top / (top + med))  # ~0.5..1; map to [0..1]
+    med = float(np.median(non_dc))
+    # Use the relative prominence of the dominant peak vs. the median background.
+    # The previous implementation used ``top / (top + med)``, which bottoms out at
+    # ``0.5`` even when no peak is present. That caused almost every image to
+    # exceed the downstream ``periodicity_threshold_*`` values, flagging strong
+    # resampling evidence for clean photos. Measure prominence as a contrast
+    # ratio that maps "no peak" -> 0 and "very strong peak" -> 1 instead.
+    score = (top - med) / (top + med + 1e-6)
     return float(np.clip(score, 0.0, 1.0))
 
 
