@@ -58,7 +58,7 @@ def _periodicity_score(patch_gray: np.ndarray) -> float:
     # Normalize radial curve
     if radial.size < 8 or float(radial.max()) == 0.0:
         return 0.0
-    rc = (radial - radial.min()) / (radial.ptp() + 1e-6)
+    rc = (radial - radial.min()) / (np.ptp(radial) + 1e-6)
 
     # Peakiness: take 1D FFT of the radial profile and measure spectral concentration at non-zero bins
     spec = np.abs(np.fft.rfft(rc))
@@ -104,7 +104,7 @@ def run_resampling_map(
     mod_mask = (heat >= thr_moderate) & (~strong_mask)
 
     # Visualize heatmap -> upscale to image size for nicer overlays later
-    heat_norm = (255.0 * (heat - heat.min()) / (heat.ptp() + 1e-6)).astype(np.uint8)
+    heat_norm = (255.0 * (heat - heat.min()) / (np.ptp(heat) + 1e-6)).astype(np.uint8)
     vis = cv2.resize(heat_norm, (w, h), interpolation=cv2.INTER_NEAREST)
 
     return ResamplingResult(

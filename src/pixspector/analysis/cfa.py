@@ -38,12 +38,12 @@ def _cfa_periodicity_score(rgb_u8: np.ndarray) -> float:
     phases = np.zeros((2, 2), dtype=np.float32)
 
     # local prediction (mean of cross neighbors)
-    pred = 0.25 * (
-        np.pad(g, ((1, 1), (0, 0)), mode="reflect")[0:h, :] +     # up
-        np.pad(g, ((0, 0), (0, 0)), mode="reflect")[1:h + 1, :] + # down
-        np.pad(g, ((0, 0), (1, 1)), mode="reflect")[:, 0:w] +     # left
-        np.pad(g, ((0, 0), (0, 0)), mode="reflect")[:, 1:w + 1]   # right
-    )
+    gp = np.pad(g, 1, mode="reflect")
+    up = gp[0:h, 1:w + 1]
+    down = gp[2:h + 2, 1:w + 1]
+    left = gp[1:h + 1, 0:w]
+    right = gp[1:h + 1, 2:w + 2]
+    pred = 0.25 * (up + down + left + right)
     resid = np.abs(g - pred)
 
     # Aggregate residual energy by CFA phase
@@ -57,7 +57,7 @@ def _cfa_periodicity_score(rgb_u8: np.ndarray) -> float:
     phases = phases / (counts + 1e-6)
 
     # Normalize phase energies; strong imbalance between phases -> inconsistency
-    phases = (phases - phases.min()) / (phases.ptp() + 1e-6)
+    phases = (phases - phases.min()) / (np.ptp(phases) + 1e-6)
     # score = variance across 4 phases
     score = float(np.var(phases))
     return float(np.clip(score, 0.0, 1.0))
@@ -88,7 +88,7 @@ def run_cfa_map(
     strong_mask = heat >= thr_strong
     mod_mask = (heat >= thr_moderate) & (~strong_mask)
 
-    heat_norm = (255.0 * (heat - heat.min()) / (heat.ptp() + 1e-6)).astype(np.uint8)
+    heat_norm = (255.0 * (heat - heat.min()) / (np.ptp(heat) + 1e-6)).astype(np.uint8)
     vis = cv2.resize(heat_norm, (w, h), interpolation=cv2.INTER_NEAREST)
 
     return CFAResult(

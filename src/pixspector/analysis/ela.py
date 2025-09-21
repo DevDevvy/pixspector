@@ -31,10 +31,10 @@ def _pil_recompress(rgb: np.ndarray, quality: int) -> np.ndarray:
     Recompress an RGB array with Pillow at given JPEG quality, return RGB uint8.
     """
     h, w = rgb.shape[:2]
-    pil_im = Image.fromarray(rgb, mode="RGB")
+    pil_im = Image.fromarray(rgb)
     from io import BytesIO
     buf = BytesIO()
-    pil_im.save(buf, format="JPEG", quality=int(quality), subsampling="keep")
+    pil_im.save(buf, format="JPEG", quality=int(quality))
     buf.seek(0)
     recompressed = Image.open(buf).convert("RGB")
     arr = np.array(recompressed, dtype=np.uint8)
