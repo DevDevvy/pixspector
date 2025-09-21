@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..config import Config
+from ..config import Config, find_defaults_path
 from ..pipeline import analyze_single_image
 
 
@@ -73,7 +73,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("pixspector")
         self.resize(1200, 760)
 
-        self.defaults_path = Path(__file__).resolve().parent.parent.parent / "config" / "defaults.yaml"
+        self.defaults_path = find_defaults_path(Path(__file__))
         self.cfg = Config.load(self.defaults_path, None)
 
         # --- Widgets

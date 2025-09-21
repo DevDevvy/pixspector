@@ -13,7 +13,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 from . import __version__
-from .config import Config
+from .config import Config, find_defaults_path
 from .pipeline import analyze_single_image
 
 app = typer.Typer(add_completion=False, help="pixspector — classical image forensics (no ML).")
@@ -68,8 +68,9 @@ def analyze(
     _ensure_outdir(report)
 
     # Load configuration
-    defaults_path = Path(__file__).resolve().parent.parent.parent / "config" / "defaults.yaml"
-    if not defaults_path.exists():
+    try:
+        defaults_path = find_defaults_path(Path(__file__))
+    except FileNotFoundError:
         console.print("[red]defaults.yaml not found. Did you create the repo via the bootstrap script?[/]")
         raise typer.Exit(code=1)
     cfg = Config.load(defaults_path=defaults_path, override_path=config)

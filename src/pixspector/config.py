@@ -57,3 +57,19 @@ def _deep_update(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+def find_defaults_path(start: Optional[Path] = None) -> Path:
+    """Locate the repository defaults.yaml relative to ``start``.
+
+    Walks up the directory tree from ``start`` (or this file) until a
+    ``config/defaults.yaml`` file is found.
+    """
+
+    ref = start or Path(__file__).resolve()
+    ref = ref if ref.is_dir() else ref.parent
+    for parent in [ref, *ref.parents]:
+        candidate = parent / "config" / "defaults.yaml"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError("config/defaults.yaml not found")
