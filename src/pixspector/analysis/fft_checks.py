@@ -39,7 +39,7 @@ def run_fft_checks(gray_u8: np.ndarray, radial_bins: int = 64, peak_prominence: 
     mag = np.abs(np.fft.fftshift(fft))
     logmag = np.log1p(mag)
     # Normalize to 0..255 u8 for visualization
-    vis = (255.0 * (logmag - logmag.min()) / (logmag.ptp() + 1e-6)).astype(np.uint8)
+    vis = (255.0 * (logmag - logmag.min()) / (np.ptp(logmag) + 1e-6)).astype(np.uint8)
 
     # Radial profile (bin to fixed length)
     cy, cx = h // 2, w // 2
@@ -55,7 +55,7 @@ def run_fft_checks(gray_u8: np.ndarray, radial_bins: int = 64, peak_prominence: 
 
     # normalize radial
     if float(radial.max()) > 0:
-        radial = (radial - radial.min()) / (radial.ptp() + 1e-6)
+        radial = (radial - radial.min()) / (np.ptp(radial) + 1e-6)
 
     # Peak detection on radial curve (ignore bin 0)
     rp = radial.copy()

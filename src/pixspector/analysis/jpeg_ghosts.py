@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -26,9 +26,9 @@ class GhostsResult:
 
 def _recompress_rgb(rgb: np.ndarray, quality: int) -> np.ndarray:
     from io import BytesIO
-    pil_im = Image.fromarray(rgb, mode="RGB")
+    pil_im = Image.fromarray(rgb)
     buf = BytesIO()
-    pil_im.save(buf, format="JPEG", quality=int(quality), subsampling="keep")
+    pil_im.save(buf, format="JPEG", quality=int(quality))
     buf.seek(0)
     rec = Image.open(buf).convert("RGB")
     return np.array(rec, dtype=np.uint8)
@@ -56,7 +56,7 @@ def _grid_misalignment_score(gray_diff: np.ndarray, block: int = 8) -> float:
             bins[i % blk].append(float(v))
         means = np.array([np.mean(b) if b else 0.0 for b in bins], dtype=np.float32)
         # strong if one or two phases dominate (misalignment)
-        means = (means - means.min()) / (means.ptp() + 1e-6)
+        means = (means - means.min()) / (np.ptp(means) + 1e-6)
         return float(np.max(means))
 
     r = periodic_offset_strength(row_sig, block)

@@ -44,6 +44,12 @@ Activate the environment:
 source .venv/bin/activate
 ```
 
+Install pixspector into the environment so the CLI and GUI entry points are
+available:
+```bash
+pip install -e .
+```
+
 ## Usage
 
 ### CLI mode
@@ -79,9 +85,13 @@ You can run pixspector with a friendly GUI.
 
 #### Dev mode
 ```bash
-# in your venv
+# in your activated venv
 pixspector-gui
 ```
+
+> **Tip:** If `pixspector-gui` is not recognized, ensure you have installed the
+> package into the virtual environment (e.g., `pip install -e .`). You can also
+> start the GUI directly with `python -m pixspector.gui.app`.
 
 - Drag & drop images or click **Browse…**  
 - Choose an output folder  

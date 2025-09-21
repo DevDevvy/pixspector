@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
 import cv2
 import numpy as np
