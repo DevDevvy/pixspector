@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 import cv2
 import numpy as np
@@ -54,7 +54,7 @@ def run_prnu(
 
     # Visualization: normalize to 0..255
     r = residual.copy()
-    r = (r - r.min()) / (r.ptp() + 1e-6)
+    r = (r - r.min()) / (np.ptp(r) + 1e-6)
     vis = (255.0 * r).astype(np.uint8)
 
     mean_abs = float(np.mean(np.abs(residual)))

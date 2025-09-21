@@ -5,7 +5,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import ExifRead
+import exifread
 from PIL import Image, JpegImagePlugin
 
 
@@ -26,7 +26,7 @@ class Metadata:
 def _read_exif(path: Path) -> Dict[str, Any]:
     try:
         with open(path, "rb") as f:
-            tags = ExifRead.process_file(f, details=False)
+            tags = exifread.process_file(f, details=False)
         # Convert to plain dict with string keys/values
         return {str(k): str(v) for k, v in tags.items()}
     except Exception:
