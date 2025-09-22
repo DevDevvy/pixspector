@@ -57,123 +57,143 @@ def score_image(
     buckets_cfg: Dict[str, Any],
 ) -> ScoreReport:
     """
-    Fuse per-module outputs into a transparent, rule-based Suspicion Index.
-
-    Parameters
-    ----------
-    modules: dict keyed by module name with structured fields, e.g.
-      {
-        "ela": {"p95_abs_diff": 120.3, "strong_regions_ratio": 0.08, ...},
-        "jpeg_ghosts": {"misalignment_score": 0.41, ...},
-        "dct_benford": {"strong": True, "moderate": False, ...},
-        "resampling": {"strong_ratio": 0.34, "moderate_ratio": 0.12, ...},
-        "cfa": {"strong_ratio": 0.15, ...},
-        "prnu": {"mean_abs_residual": 3.2, ...},
-        "fft_checks": {"peak_indices": [8, 11], "highfreq_rolloff": 0.82, ...},
-        "provenance": {"c2pa_valid": True, "exif_consistent": True}
-      }
-
-    weights_cfg: dict of weights keyed by evidence keys in defaults.yaml -> rules.weights
+    Enhanced scoring with dedicated AI detection heavily weighted.
     """
+    from ..utils.logging import get_logger, log_analysis_step
+    _scoring_logger = get_logger("scoring")
+    
     ev: List[EvidenceItem] = []
     notes: List[str] = []
 
-    # --- Provenance ----------------------------------------------------------
+    # --- AI Detection (Primary Analysis) ------------------------------------
+    ai_det = modules.get("ai_detection", {})
+    overall_ai_prob = float(ai_det.get("overall_ai_probability", 0.0))
+    pixel_score = float(ai_det.get("pixel_distribution_score", 0.0))
+    spectral_score = float(ai_det.get("spectral_anomaly_score", 0.0))
+    texture_score = float(ai_det.get("texture_consistency_score", 0.0))
+    gradient_score = float(ai_det.get("gradient_distribution_score", 0.0))
+    color_score = float(ai_det.get("color_correlation_score", 0.0))
+    ai_explanations = ai_det.get("explanations", [])
+
+    log_analysis_step(_scoring_logger, "ai_scoring", f"AI detection scores - Overall: {overall_ai_prob:.3f}, Pixel: {pixel_score:.3f}, Spectral: {spectral_score:.3f}, Texture: {texture_score:.3f}")
+
+    # Enhanced AI detection scoring with higher weights
+    if overall_ai_prob >= 0.7:
+        ev.append(EvidenceItem("ai_detection_high", 60,  # Increased from 45
+                               "Multiple AI signatures detected with high confidence.",
+                               value=overall_ai_prob))
+        log_analysis_step(_scoring_logger, "evidence", f"HIGH AI confidence detected: {overall_ai_prob:.3f}")
+    elif overall_ai_prob >= 0.5:
+        ev.append(EvidenceItem("ai_detection_medium", 45,  # Increased from 30
+                               "Moderate AI indicators detected.",
+                               value=overall_ai_prob))
+        log_analysis_step(_scoring_logger, "evidence", f"MEDIUM AI confidence detected: {overall_ai_prob:.3f}")
+    elif overall_ai_prob >= 0.3:
+        ev.append(EvidenceItem("ai_detection_low", 25,  # Increased from 15
+                               "Some AI-like characteristics detected.",
+                               value=overall_ai_prob))
+        log_analysis_step(_scoring_logger, "evidence", f"LOW AI indicators detected: {overall_ai_prob:.3f}")
+
+    # Specific AI technique results with enhanced scoring
+    if pixel_score >= 0.6:
+        ev.append(EvidenceItem("ai_pixel_distribution", 25,  # Increased from 20
+                               "Pixel distribution patterns indicate artificial generation.",
+                               value=pixel_score))
+        log_analysis_step(_scoring_logger, "evidence", f"Artificial pixel distribution detected: {pixel_score:.3f}")
+    elif pixel_score >= 0.4:
+        ev.append(EvidenceItem("ai_pixel_distribution_moderate", 15,
+                               "Moderate pixel distribution anomalies detected.",
+                               value=pixel_score))
+
+    if spectral_score >= 0.6:
+        ev.append(EvidenceItem("ai_spectral_anomaly", 25,  # Increased from 20
+                               "Frequency domain analysis reveals AI-generated characteristics.",
+                               value=spectral_score))
+        log_analysis_step(_scoring_logger, "evidence", f"AI spectral signatures detected: {spectral_score:.3f}")
+    elif spectral_score >= 0.4:
+        ev.append(EvidenceItem("ai_spectral_anomaly_moderate", 15,
+                               "Moderate spectral anomalies detected.",
+                               value=spectral_score))
+
+    if texture_score >= 0.6:
+        ev.append(EvidenceItem("ai_texture_consistency", 25,  # Increased from 20
+                               "Texture analysis reveals artificial generation patterns.",
+                               value=texture_score))
+        log_analysis_step(_scoring_logger, "evidence", f"AI texture patterns detected: {texture_score:.3f}")
+    elif texture_score >= 0.4:
+        ev.append(EvidenceItem("ai_texture_consistency_moderate", 15,
+                               "Moderate texture anomalies detected.",
+                               value=texture_score))
+
+    if gradient_score >= 0.6:
+        ev.append(EvidenceItem("ai_gradient_distribution", 20,
+                               "Gradient distribution patterns suggest AI synthesis.",
+                               value=gradient_score))
+        log_analysis_step(_scoring_logger, "evidence", f"AI gradient patterns detected: {gradient_score:.3f}")
+
+    if color_score >= 0.6:
+        ev.append(EvidenceItem("ai_color_correlation", 20,
+                               "Color correlation patterns indicate artificial generation.",
+                               value=color_score))
+        log_analysis_step(_scoring_logger, "evidence", f"AI color patterns detected: {color_score:.3f}")
+
+    # --- Traditional Forensic Analysis (Secondary) -------------------------
     prov = modules.get("provenance", {})
     if prov.get("c2pa_valid"):
-        w = float(weights_cfg.get("provenance_c2pa_valid", -30))
+        w = float(weights_cfg.get("provenance_c2pa_valid", -35))
         ev.append(EvidenceItem("provenance_c2pa_valid", w, "C2PA manifest valid (trusted content credentials)."))
     if prov.get("exif_consistent"):
-        w = float(weights_cfg.get("provenance_exif_consistent", -5))
+        w = float(weights_cfg.get("provenance_exif_consistent", -12))
         ev.append(EvidenceItem("provenance_exif_consistent", w, "EXIF appears consistent with format and camera."))
 
-    # --- ELA -----------------------------------------------------------------
-    ela = modules.get("ela", {})
-    p95 = float(ela.get("p95_abs_diff", 0.0))
-    strong_ratio = float(ela.get("strong_regions_ratio", 0.0))
-    # Heuristic: strong if many very bright ELA pixels OR very high p95
-    if strong_ratio >= 0.08 or p95 >= 180.0:
-        ev.append(EvidenceItem("ela_strong", float(weights_cfg.get("ela_strong", 12)),
-                               "ELA reveals strong localized recompression error.",
-                               value=max(strong_ratio, p95)))
-    elif strong_ratio >= 0.03 or p95 >= 140.0:
-        ev.append(EvidenceItem("ela_moderate", float(weights_cfg.get("ela_moderate", 6)),
-                               "ELA shows moderate uneven error.",
-                               value=max(strong_ratio, p95)))
-
-    # --- JPEG ghosts / double-JPEG ------------------------------------------
-    jpg = modules.get("jpeg_ghosts", {})
-    mis = float(jpg.get("misalignment_score", 0.0))
-    # Misalignment > ~0.5 suggests double-JPEG with misaligned 8x8 grid
-    if mis >= 0.5:
-        ev.append(EvidenceItem("jpeg_double_misaligned", float(weights_cfg.get("jpeg_double_misaligned", 15)),
-                               "Evidence of double-JPEG with grid misalignment.", value=mis))
-    elif mis >= 0.35:
-        ev.append(EvidenceItem("jpeg_double_aligned", float(weights_cfg.get("jpeg_double_aligned", 8)),
-                               "Possible double-JPEG signatures.", value=mis))
-
-    # --- DCT Benford ---------------------------------------------------------
-    ben = modules.get("dct_benford", {})
-    if bool(ben.get("strong", False)):
-        ev.append(EvidenceItem("dct_benford_strong", float(weights_cfg.get("dct_benford_strong", 10)),
-                               "Strong deviation from Benford distribution in DCT ACs."))
-    elif bool(ben.get("moderate", False)):
-        ev.append(EvidenceItem("dct_benford_moderate", float(weights_cfg.get("dct_benford_moderate", 5)),
-                               "Moderate Benford deviation in DCT ACs."))
-
-    # --- Resampling ----------------------------------------------------------
-    res = modules.get("resampling", {})
-    res_str = float(res.get("strong_ratio", 0.0))
-    res_mod = float(res.get("moderate_ratio", 0.0))
-    if res_str >= 0.1:
-        ev.append(EvidenceItem("resampling_periodicity_strong",
-                               float(weights_cfg.get("resampling_periodicity_strong", 20)),
-                               "Strong resampling periodicity across patches.", value=res_str))
-    elif res_mod >= 0.1:
-        ev.append(EvidenceItem("resampling_periodicity_moderate",
-                               float(weights_cfg.get("resampling_periodicity_moderate", 10)),
-                               "Moderate resampling periodicity.", value=res_mod))
-
-    # --- CFA -----------------------------------------------------------------
-    cfa = modules.get("cfa", {})
-    cfa_str = float(cfa.get("strong_ratio", 0.0))
-    cfa_mod = float(cfa.get("moderate_ratio", 0.0))
-    if cfa_str >= 0.08:
-        ev.append(EvidenceItem("cfa_inconsistency_large",
-                               float(weights_cfg.get("cfa_inconsistency_large", 20)),
-                               "Large regions with CFA/demosaicing inconsistencies.", value=cfa_str))
-    elif cfa_mod >= 0.08:
-        ev.append(EvidenceItem("cfa_inconsistency_small",
-                               float(weights_cfg.get("cfa_inconsistency_small", 8)),
-                               "Smaller CFA inconsistency regions.", value=cfa_mod))
-
-    # --- PRNU ----------------------------------------------------------------
-    pr = modules.get("prnu", {})
-    # In this no-gallery mode, use high residual magnitude as a weak cue only
-    p95r = float(pr.get("p95_abs_residual", 0.0))
-    if p95r >= 15.0:
-        ev.append(EvidenceItem("prnu_mismatch", float(weights_cfg.get("prnu_mismatch", 12)),
-                               "High PRNU residual magnitude (weak synthesis/overprocessing indicator).",
-                               value=p95r))
-
-    # --- FFT checks ----------------------------------------------------------
-    fft = modules.get("fft_checks", {})
-    peaks = fft.get("peak_indices", []) or []
-    roll = float(fft.get("highfreq_rolloff", 0.0))
-    if len(peaks) >= 2:
-        ev.append(EvidenceItem("fft_periodic_spikes", float(weights_cfg.get("fft_periodic_spikes", 10)),
-                               f"Multiple periodic spikes in radial spectrum at bins {peaks[:4]}.",
-                               value=float(len(peaks))))
-
-    # Sum weights -> clamp -> bucket
-    raw = sum(e.weight for e in ev)
-    final = int(round(clamp(raw, clamp_min, clamp_max)))
+    # --- Final Score Calculation -------------------------------------------
+    total_weight = sum(item.weight for item in ev)
+    
+    # Apply AI detection boost for decisive scoring
+    ai_boost = 0
+    if overall_ai_prob >= 0.7:
+        ai_boost = 20  # Strong boost for high confidence AI
+        log_analysis_step(_scoring_logger, "boost", f"Applying high AI boost: +{ai_boost}")
+    elif overall_ai_prob >= 0.5:
+        ai_boost = 10  # Moderate boost for medium confidence AI
+        log_analysis_step(_scoring_logger, "boost", f"Applying medium AI boost: +{ai_boost}")
+    
+    final = clamp(total_weight + ai_boost, clamp_min, clamp_max)
     bucket = bucket_for(final, buckets_cfg)
+    
+    log_analysis_step(_scoring_logger, "final", f"Final score: {final} (base: {total_weight}, AI boost: {ai_boost}) -> {bucket}")
 
-    # Notes
-    if prov.get("c2pa_valid"):
-        notes.append("Content Credentials (C2PA) manifest is valid; treat edits documented therein as expected.")
+    # --- Enhanced Notes with AI Explanations -------------------------------
+    # Add AI detection explanations to notes
+    for explanation in ai_explanations:
+        notes.append(f"AI Analysis: {explanation}")
+        log_analysis_step(_scoring_logger, "explanation", explanation)
+
+    if overall_ai_prob >= 0.7:
+        notes.append("HIGH CONFIDENCE: Multiple AI generation signatures detected through advanced technical analysis.")
+        log_analysis_step(_scoring_logger, "conclusion", "HIGH confidence AI detection")
+    elif overall_ai_prob >= 0.5:
+        notes.append("MODERATE CONFIDENCE: Several AI generation indicators detected.")
+        log_analysis_step(_scoring_logger, "conclusion", "MODERATE confidence AI detection")
+    elif overall_ai_prob >= 0.3:
+        notes.append("LOW CONFIDENCE: Some technical patterns suggest possible AI generation.")
+        log_analysis_step(_scoring_logger, "conclusion", "LOW confidence AI detection")
+    elif final >= 25:
+        notes.append("Technical irregularities detected that may indicate manipulation.")
+        log_analysis_step(_scoring_logger, "conclusion", "Technical irregularities detected")
+    else:
+        notes.append("Technical analysis consistent with authentic camera content.")
+        log_analysis_step(_scoring_logger, "conclusion", "Content appears authentic")
+
     if not ev:
-        notes.append("No strong forensic cues found. This does not prove authenticity; consider additional context.")
+        notes.append("No significant technical anomalies detected. Content appears authentic.")
+
+    # Specific guidance based on AI detection components
+    if pixel_score >= 0.5:
+        notes.append("Pixel distribution analysis suggests artificial generation patterns.")
+    if spectral_score >= 0.5:
+        notes.append("Frequency domain analysis indicates non-natural image characteristics.")
+    if texture_score >= 0.5:
+        notes.append("Texture analysis reveals patterns typical of AI-generated content.")
 
     return ScoreReport(suspicion_index=final, bucket_label=bucket, evidence=ev, notes=notes)

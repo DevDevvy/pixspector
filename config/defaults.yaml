@@ -8,35 +8,46 @@ app:
   tile_size: 128 # default tile size for patch-based analyses
 
 rules:
-  # Initial, conservative weights. Tunable.
-  # Positive => adds suspicion, Negative => reduces suspicion
+  # AI-focused weights based on research
   weights:
-    ela_strong: 12
-    ela_moderate: 6
-    jpeg_double_misaligned: 15
-    jpeg_double_aligned: 8
-    dct_benford_strong: 10
-    dct_benford_moderate: 5
-    resampling_periodicity_strong: 20
-    resampling_periodicity_moderate: 10
-    cfa_inconsistency_large: 20
-    cfa_inconsistency_small: 8
-    prnu_mismatch: 12
-    fft_periodic_spikes: 10
-    provenance_c2pa_valid: -30
-    provenance_exif_consistent: -5
+    # AI Detection (Primary)
+    ai_detection_high: 45
+    ai_detection_medium: 30
+    ai_detection_low: 15
+    ai_pixel_distribution: 25
+    ai_pixel_distribution_moderate: 12
+    ai_spectral_anomaly: 20
+    ai_texture_inconsistency: 18
+
+    # Traditional forensics (Secondary)
+    ela_strong: 8
+    ela_moderate: 4
+    jpeg_double_misaligned: 10
+    jpeg_double_aligned: 5
+    dct_benford_strong: 15
+    dct_benford_moderate: 8
+    resampling_periodicity_strong: 12
+    resampling_periodicity_moderate: 6
+    cfa_inconsistency_large: 12
+    cfa_inconsistency_small: 6
+    prnu_mismatch: 8
+    fft_periodic_spikes: 5
+
+    # Provenance (Negative weights)
+    provenance_c2pa_valid: -35
+    provenance_exif_consistent: -12
 
   # Clamp final score to [0, 100]
   clamp_min: 0
   clamp_max: 100
 
-  # Buckets for quick narrative labels (you can tweak)
+  # Adjusted buckets for AI detection
   buckets:
     low:
-      max: 30
+      max: 20
       label: "Low"
     medium:
-      max: 60
+      max: 45
       label: "Medium"
     high:
       max: 100
@@ -44,30 +55,30 @@ rules:
 
 modules:
   ela:
-    recompress_quality: 90
+    recompress_quality: 90 # Back to standard value
     blur_sigma: 0.0
 
   jpeg_ghosts:
-    q_grid: [60, 70, 80, 85, 90, 95]
-    diff_metric: "l1" # l1 | l2
+    q_grid: [60, 70, 80, 85, 90, 95] # Standard range
+    diff_metric: "l1"
     misalign_window: 8
 
   dct_benford:
-    min_blocks: 256
-    strong_z: 3.0
-    moderate_z: 2.0
+    min_blocks: 256 # Back to standard
+    strong_z: 2.5 # Balanced sensitivity
+    moderate_z: 1.8
 
   resampling:
-    patch: 128
+    patch: 128 # Back to standard
     stride: 64
     radon_angles: 30
-    periodicity_threshold_strong: 0.35
+    periodicity_threshold_strong: 0.35 # Standard thresholds
     periodicity_threshold_moderate: 0.25
 
   cfa:
-    patch: 64
+    patch: 64 # Back to standard
     stride: 32
-    inconsistency_threshold_strong: 0.35
+    inconsistency_threshold_strong: 0.35 # Standard thresholds
     inconsistency_threshold_moderate: 0.25
 
   prnu:
@@ -78,3 +89,11 @@ modules:
     radial_bins: 64
     peak_prominence: 6.0
     highfreq_rolloff_warn: 0.75
+
+  # Add AI detection configuration
+  ai_detection:
+    pixel_analysis: true
+    spectral_analysis: true
+    texture_analysis: true
+    gradient_analysis: true
+    color_analysis: true

@@ -22,45 +22,164 @@ class CFAResult:
         return d
 
 
-def _cfa_periodicity_score(rgb_u8: np.ndarray) -> float:
+def _estimate_camera_processing_level(rgb_u8: np.ndarray) -> float:
     """
-    Heuristic CFA/demosaicing consistency:
-    - Work mostly on the green channel (dominant in Bayer)
-    - Compare pixel vs. local directional averages at Bayer phases
-    - Strong deviations from 2x2 periodicity raise the score
-    Returns [0..1].
+    Estimate how much in-camera processing was applied.
+    Modern cameras heavily process images, which can mask CFA patterns.
+    Returns score [0..1] where higher means more processing.
     """
     rgb = rgb_u8.astype(np.float32)
+    
+    # Check for noise reduction (smooth areas should be very smooth)
+    noise_reduction_score = 0.0
+    h, w = rgb.shape[:2]
+    
+    # Sample smooth regions (low gradient areas)
+    for ch in range(3):
+        channel = rgb[..., ch]
+        grad_mag = np.sqrt(cv2.Sobel(channel, cv2.CV_32F, 1, 0)**2 + 
+                          cv2.Sobel(channel, cv2.CV_32F, 0, 1)**2)
+        
+        # Find smooth regions (bottom 20% of gradient magnitudes)
+        smooth_threshold = np.percentile(grad_mag, 20)
+        smooth_mask = grad_mag < smooth_threshold
+        
+        if np.any(smooth_mask):
+            smooth_areas = channel[smooth_mask]
+            # In heavily processed images, smooth areas are very uniform
+            uniformity = 1.0 - (np.std(smooth_areas) / (np.mean(smooth_areas) + 1e-6))
+            noise_reduction_score += uniformity
+    
+    noise_reduction_score /= 3.0  # Average across channels
+    
+    # Check for sharpening (enhanced edges)
+    sharpening_score = 0.0
+    for ch in range(3):
+        channel = rgb[..., ch]
+        laplacian = cv2.Laplacian(channel, cv2.CV_32F, ksize=3)
+        
+        # Strong Laplacian responses at edges indicate sharpening
+        edge_strength = np.std(laplacian)
+        # Normalize by typical values (empirically determined)
+        sharpening_score += min(1.0, edge_strength / 15.0)
+    
+    sharpening_score /= 3.0
+    
+    # Overall processing level
+    processing_level = 0.6 * noise_reduction_score + 0.4 * sharpening_score
+    return float(np.clip(processing_level, 0.0, 1.0))
+
+
+def _cfa_periodicity_score(rgb_u8: np.ndarray) -> float:
+    """
+    Enhanced CFA analysis that accounts for modern camera processing.
+    """
+    rgb = rgb_u8.astype(np.float32)
+    
+    # Estimate processing level first
+    processing_level = _estimate_camera_processing_level(rgb_u8)
+    
+    # If heavy processing detected, CFA patterns may be legitimately absent
+    if processing_level > 0.8:
+        # For heavily processed images, only flag if patterns are completely absent
+        # or show clear signs of synthesis
+        synthesis_threshold = 0.6
+    else:
+        # For lightly processed images, use standard threshold
+        synthesis_threshold = 0.3
+    
+    # Focus on green channel (most informative for Bayer CFA)
     g = rgb[..., 1]
-
-    # Expected Bayer periodicity ~2; build 2x2 phase maps
     h, w = g.shape
-    phases = np.zeros((2, 2), dtype=np.float32)
+    
+    # Enhanced phase analysis with multiple scales
+    phase_scores = []
+    
+    for scale in [2, 4]:  # Check 2x2 and 4x4 periodicities
+        phases = np.zeros((scale, scale), dtype=np.float32)
+        counts = np.zeros((scale, scale), dtype=np.int64)
+        
+        # Build prediction error map
+        gp = np.pad(g, 1, mode="reflect")
+        up = gp[0:h, 1:w + 1]
+        down = gp[2:h + 2, 1:w + 1]
+        left = gp[1:h + 1, 0:w]
+        right = gp[1:h + 1, 2:w + 2]
+        pred = 0.25 * (up + down + left + right)
+        resid = np.abs(g - pred)
+        
+        # Aggregate by phase
+        for y in range(h):
+            for x in range(w):
+                py, px = y % scale, x % scale
+                phases[py, px] += resid[y, x]
+                counts[py, px] += 1
+        
+        # Normalize by counts
+        phases = phases / (counts + 1e-6)
+        
+        # Calculate phase variance (high variance = inconsistent CFA)
+        if np.any(phases > 0):
+            phases_norm = (phases - phases.min()) / (np.ptp(phases) + 1e-6)
+            phase_variance = float(np.var(phases_norm))
+            phase_scores.append(phase_variance)
+    
+    # Use the scale that shows most inconsistency
+    if phase_scores:
+        max_inconsistency = max(phase_scores)
+        
+        # Adjust score based on processing level
+        if max_inconsistency > synthesis_threshold:
+            # Further analysis: check if inconsistency pattern looks synthetic
+            return _check_synthesis_patterns(rgb_u8, max_inconsistency)
+        else:
+            return 0.0
+    
+    return 0.0
 
-    # local prediction (mean of cross neighbors)
-    gp = np.pad(g, 1, mode="reflect")
-    up = gp[0:h, 1:w + 1]
-    down = gp[2:h + 2, 1:w + 1]
-    left = gp[1:h + 1, 0:w]
-    right = gp[1:h + 1, 2:w + 2]
-    pred = 0.25 * (up + down + left + right)
-    resid = np.abs(g - pred)
 
-    # Aggregate residual energy by CFA phase
-    counts = np.zeros((2, 2), dtype=np.int64)
-    for y in range(h):
-        for x in range(w):
-            py, px = y & 1, x & 1
-            phases[py, px] += resid[y, x]
-            counts[py, px] += 1
-
-    phases = phases / (counts + 1e-6)
-
-    # Normalize phase energies; strong imbalance between phases -> inconsistency
-    phases = (phases - phases.min()) / (np.ptp(phases) + 1e-6)
-    # score = variance across 4 phases
-    score = float(np.var(phases))
-    return float(np.clip(score, 0.0, 1.0))
+def _check_synthesis_patterns(rgb_u8: np.ndarray, base_score: float) -> float:
+    """
+    Check if CFA inconsistencies match patterns typical of AI synthesis.
+    """
+    # AI-generated images often have:
+    # 1. Completely missing CFA patterns
+    # 2. Artificially regular patterns
+    # 3. Inconsistent patterns across the image
+    
+    rgb = rgb_u8.astype(np.float32)
+    g = rgb[..., 1]  # Green channel
+    h, w = g.shape
+    
+    # Check spatial consistency of CFA pattern strength
+    patch_size = 32
+    pattern_strengths = []
+    
+    for y in range(0, h - patch_size, patch_size // 2):
+        for x in range(0, w - patch_size, patch_size // 2):
+            patch = g[y:y + patch_size, x:x + patch_size]
+            if patch.shape[0] == patch_size and patch.shape[1] == patch_size:
+                # Quick CFA strength estimate for this patch
+                phases_2x2 = np.zeros(4)
+                for py in range(2):
+                    for px in range(2):
+                        phase_pixels = patch[py::2, px::2]
+                        phases_2x2[py * 2 + px] = np.var(phase_pixels)
+                
+                pattern_strength = np.var(phases_2x2) if np.any(phases_2x2) else 0
+                pattern_strengths.append(pattern_strength)
+    
+    if len(pattern_strengths) > 4:
+        # AI images often have very inconsistent CFA strength across regions
+        spatial_consistency = 1.0 - (np.std(pattern_strengths) / (np.mean(pattern_strengths) + 1e-6))
+        
+        # If spatial consistency is very low, likely synthetic
+        if spatial_consistency < 0.3:
+            return min(1.0, base_score * 1.5)  # Boost score for likely synthesis
+        elif spatial_consistency > 0.8:
+            return max(0.0, base_score * 0.5)  # Reduce score for natural variation
+    
+    return base_score
 
 
 def run_cfa_map(

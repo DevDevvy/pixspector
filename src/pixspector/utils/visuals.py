@@ -5,6 +5,8 @@ from typing import Optional, Sequence
 
 import cv2
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend to prevent GUI warnings
 import matplotlib.pyplot as plt
 
 
@@ -14,13 +16,13 @@ def save_heatmap_png(img_u8: np.ndarray, out_path: Path, title: Optional[str] = 
     (No style/colors specified to keep deps simple and consistent.)
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
+    plt.figure(figsize=(8, 6))
     plt.imshow(img_u8, cmap="viridis")
     if title:
         plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 
@@ -35,37 +37,37 @@ def save_overlay_png(base_bgr: np.ndarray, heat_u8: np.ndarray, out_path: Path,
     heat_color = cv2.applyColorMap(heat, cv2.COLORMAP_VIRIDIS)
     overlay = cv2.addWeighted(base_bgr, 1.0, heat_color, alpha, 0)
 
-    plt.figure()
+    plt.figure(figsize=(10, 8))
     plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
     if title:
         plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 
 def save_image_png(img_bgr: np.ndarray, out_path: Path, title: Optional[str] = None) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
+    plt.figure(figsize=(8, 6))
     plt.imshow(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
     if title:
         plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 
 def save_grayscale_png(img_u8: np.ndarray, out_path: Path, title: Optional[str] = None) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure()
+    plt.figure(figsize=(8, 6))
     plt.imshow(img_u8, cmap="gray")
     if title:
         plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 
@@ -76,7 +78,7 @@ def plot_curve(values: Sequence[float], out_path: Path, title: Optional[str] = N
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     x = np.arange(len(values))
-    plt.figure()
+    plt.figure(figsize=(8, 6))
     plt.plot(x, values)
     if title:
         plt.title(title)
@@ -85,5 +87,5 @@ def plot_curve(values: Sequence[float], out_path: Path, title: Optional[str] = N
     if ylabel:
         plt.ylabel(ylabel)
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()

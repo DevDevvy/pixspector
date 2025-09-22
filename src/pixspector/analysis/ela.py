@@ -43,23 +43,82 @@ def _pil_recompress(rgb: np.ndarray, quality: int) -> np.ndarray:
     return arr
 
 
+def _analyze_compression_consistency(diff: np.ndarray) -> tuple[float, float]:
+    """
+    Analyze if compression differences are consistent with natural JPEG behavior.
+    Returns (consistency_score, uniformity_score) where higher means more natural.
+    """
+    # Convert to grayscale for analysis
+    if diff.ndim == 3:
+        gray_diff = cv2.cvtColor(diff.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+    else:
+        gray_diff = diff.astype(np.float32)
+    
+    # 1. Check for 8x8 block structure (natural JPEG should have some block artifacts)
+    h, w = gray_diff.shape
+    block_variance = []
+    for y in range(0, h-8, 8):
+        for x in range(0, w-8, 8):
+            block = gray_diff[y:y+8, x:x+8]
+            block_variance.append(np.var(block))
+    
+    if len(block_variance) > 0:
+        # Natural JPEG should have relatively uniform block variance
+        block_consistency = 1.0 - (np.std(block_variance) / (np.mean(block_variance) + 1e-6))
+        block_consistency = np.clip(block_consistency, 0, 1)
+    else:
+        block_consistency = 0.5
+    
+    # 2. Check spatial frequency distribution
+    fft = np.fft.fft2(gray_diff)
+    fft_mag = np.abs(np.fft.fftshift(fft))
+    
+    # Natural JPEG compression has predictable frequency rolloff
+    center_y, center_x = h // 2, w // 2
+    y_coords, x_coords = np.ogrid[:h, :w]
+    distances = np.sqrt((y_coords - center_y)**2 + (x_coords - center_x)**2)
+    
+    # Sample at different frequency rings
+    rings = [0.1, 0.3, 0.5, 0.7, 0.9]
+    max_dist = min(center_y, center_x)
+    ring_energies = []
+    
+    for ring in rings:
+        inner_rad = ring * max_dist * 0.8
+        outer_rad = ring * max_dist * 1.2
+        mask = (distances >= inner_rad) & (distances < outer_rad)
+        if np.any(mask):
+            ring_energies.append(np.mean(fft_mag[mask]))
+        else:
+            ring_energies.append(0)
+    
+    # Natural compression should show gradual frequency rolloff
+    if len(ring_energies) >= 3:
+        # Check if energy decreases with frequency (mostly)
+        decreasing_trend = sum(ring_energies[i] >= ring_energies[i+1] for i in range(len(ring_energies)-1))
+        uniformity_score = decreasing_trend / (len(ring_energies) - 1)
+    else:
+        uniformity_score = 0.5
+    
+    return block_consistency, uniformity_score
+
+
 def run_ela(bgr_u8: np.ndarray, recompress_quality: int = 90, blur_sigma: float = 0.0) -> ELAResult:
     """
-    Error Level Analysis:
-    - recompress at a given JPEG quality
-    - take absolute difference
-    - (optional) blur the diff slightly for visualization stability
-    Returns a visualization and simple global statistics.
+    Enhanced Error Level Analysis with natural compression pattern detection.
     """
     bgr_u8 = ensure_color(bgr_u8)
     rgb = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2RGB)
     rec_rgb = _pil_recompress(rgb, quality=recompress_quality)
 
-    diff = cv2.absdiff(rgb, rec_rgb).astype(np.float32)  # [0..255]
+    diff = cv2.absdiff(rgb, rec_rgb).astype(np.float32)
     if blur_sigma and blur_sigma > 0:
         k = int(max(3, round(blur_sigma * 4) | 1))
         diff = cv2.GaussianBlur(diff, (k, k), blur_sigma)
 
+    # Analyze compression consistency
+    consistency, uniformity = _analyze_compression_consistency(diff)
+    
     # Normalize per-channel to full 0..255 for visualization
     vis = diff.copy()
     for c in range(3):
@@ -70,12 +129,22 @@ def run_ela(bgr_u8: np.ndarray, recompress_quality: int = 90, blur_sigma: float 
     vis_u8 = np.clip(vis, 0, 255).astype(np.uint8)
     vis_u8 = cv2.cvtColor(vis_u8, cv2.COLOR_RGB2BGR)
 
-    # Global metrics
+    # Enhanced metrics that account for natural compression patterns
     gray_diff = cv2.cvtColor(vis_u8, cv2.COLOR_BGR2GRAY).astype(np.float32)
     mean_abs = float(np.mean(gray_diff))
     p95_abs = float(np.percentile(gray_diff, 95))
-    # strong regions: > 200/255 in vis (heuristic)
-    strong_ratio = float(np.mean(gray_diff > 200.0))
+    
+    # Adjust strong ratio based on compression consistency
+    base_threshold = 200.0
+    # If compression looks natural, raise the threshold significantly
+    if consistency > 0.7 and uniformity > 0.6:
+        adjusted_threshold = base_threshold * 1.5  # Much higher threshold for natural compression
+    elif consistency > 0.5 and uniformity > 0.4:
+        adjusted_threshold = base_threshold * 1.2
+    else:
+        adjusted_threshold = base_threshold
+    
+    strong_ratio = float(np.mean(gray_diff > adjusted_threshold))
 
     return ELAResult(
         diff_u8=vis_u8,
@@ -85,6 +154,9 @@ def run_ela(bgr_u8: np.ndarray, recompress_quality: int = 90, blur_sigma: float 
         meta={
             "recompress_quality": recompress_quality,
             "blur_sigma": blur_sigma,
-            "note": "ELA highlights uneven error introduced by recompression; splices/edits can stand out."
+            "compression_consistency": consistency,
+            "frequency_uniformity": uniformity,
+            "adjusted_threshold": adjusted_threshold,
+            "note": "Enhanced ELA with natural compression pattern detection."
         },
     )
