@@ -88,6 +88,20 @@ def GaussianBlur(img: np.ndarray, ksize: Tuple[int, int], sigmaX: float = 0.0, s
     return out.astype(img.dtype)
 
 
+def filter2D(src: np.ndarray, ddepth: int, kernel: np.ndarray) -> np.ndarray:
+    """Lightweight replacement for cv2.filter2D used in tests."""
+    arr = _ensure_float(src)
+    ker = np.asarray(kernel, dtype=np.float32)
+    if arr.ndim == 3:
+        channels = [ndimage.convolve(arr[..., c], ker, mode="reflect") for c in range(arr.shape[2])]
+        result = np.stack(channels, axis=2)
+    else:
+        result = ndimage.convolve(arr, ker, mode="reflect")
+    if ddepth == -1:
+        return result.astype(src.dtype)
+    return result.astype(ddepth)
+
+
 def Laplacian(img: np.ndarray, ddepth, ksize: int = 3) -> np.ndarray:
     lap = ndimage.laplace(_ensure_float(img), mode="reflect")
     return lap.astype(ddepth)
