@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
+import logging
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..config import Config, find_defaults_path
@@ -38,6 +40,38 @@ class DropList(QtWidgets.QListWidget):
             self.filesDropped.emit(files)
 
 
+class QtSignalLogHandler(logging.Handler):
+    """Forward pipeline log records to a Qt signal for the log window."""
+
+    def __init__(self, signal: QtCore.SignalInstance):
+        super().__init__(level=logging.INFO)
+        self._signal = signal
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+            # Include structured scoring/logging context if present.
+            parts = [message]
+            score = getattr(record, "score", None)
+            if score is not None:
+                try:
+                    parts.append(f"score={float(score):.2f}")
+                except Exception:
+                    parts.append(f"score={score}")
+            details = getattr(record, "details", None)
+            if details:
+                if isinstance(details, dict):
+                    formatted = ", ".join(f"{k}={v}" for k, v in details.items())
+                else:
+                    formatted = str(details)
+                parts.append(formatted)
+            text = " | ".join(parts)
+            self._signal.emit(text)
+        except Exception:
+            # Fallback to the raw message if formatting fails.
+            self._signal.emit(record.getMessage())
+
+
 class Worker(QtCore.QObject):
     progress = QtCore.Signal(str)
     finishedOne = QtCore.Signal(dict)
@@ -50,10 +84,14 @@ class Worker(QtCore.QObject):
         self.cfg = cfg
         self.out_dir = out_dir
         self.want_pdf = want_pdf
+        self._log_handler: Optional[QtSignalLogHandler] = None
 
     @QtCore.Slot()
     def run(self):
         try:
+            root_logger = logging.getLogger("pixspector")
+            self._log_handler = QtSignalLogHandler(self.progress)
+            root_logger.addHandler(self._log_handler)
             for f in self.files:
                 self.progress.emit(f"Analyzing: {f.name}")
                 try:
@@ -65,6 +103,11 @@ class Worker(QtCore.QObject):
         except Exception as e:
             self.error.emit(str(e))
             self.finishedAll.emit()
+        finally:
+            if self._log_handler:
+                root_logger = logging.getLogger("pixspector")
+                root_logger.removeHandler(self._log_handler)
+                self._log_handler = None
 
 
 class MainWindow(QtWidgets.QMainWindow):
