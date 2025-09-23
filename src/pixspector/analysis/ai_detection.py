@@ -171,10 +171,10 @@ def _analyze_spectral_characteristics(rgb_u8: np.ndarray) -> Tuple[float, Dict[s
         total_energy = np.sum(energy) + 1e-8
         split_idx = max(5, int(0.35 * len(energy)))
         high_freq_ratio = float(np.sum(energy[split_idx:]) / total_energy)
-        if high_freq_ratio > 0.2:
-            hf_anomaly = np.clip((high_freq_ratio - 0.2) / 0.25, 0.0, 1.0)
+        if high_freq_ratio > 0.32:
+            hf_anomaly = np.clip((high_freq_ratio - 0.32) / 0.35, 0.0, 1.0)
         else:
-            hf_anomaly = np.clip((0.15 - high_freq_ratio) / 0.15, 0.0, 0.6)
+            hf_anomaly = np.clip((0.2 - high_freq_ratio) / 0.2, 0.0, 0.6)
 
         # Periodic ring detection (variance of radial profile after smoothing)
         smoothed = uniform_filter(radial_profile, size=5)
@@ -287,10 +287,12 @@ def _analyze_local_texture_patterns(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
             uniform_patterns += lbp_hist[i]
 
     uniform_anomaly = 0.0
-    if uniform_patterns < 0.55:
-        uniform_anomaly = np.clip((0.55 - uniform_patterns) / 0.55, 0.0, 1.0)
-    elif uniform_patterns > 0.8:
-        uniform_anomaly = np.clip((uniform_patterns - 0.8) / 0.2, 0.0, 1.0)
+    if uniform_patterns < 0.6:
+        # Very low presence of uniform LBP patterns points to synthetic micro texture.
+        uniform_anomaly = np.clip((0.6 - uniform_patterns) / 0.6, 0.0, 1.0)
+    elif uniform_patterns > 0.9:
+        # Extremely high uniformity can hint at stylised renders but is a weaker signal.
+        uniform_anomaly = np.clip((uniform_patterns - 0.9) / 0.1, 0.0, 0.6)
 
     # 2. Patch entropy variance ----------------------------------------------------------
     h, w = gray.shape
@@ -317,8 +319,19 @@ def _analyze_local_texture_patterns(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
     entropy_variance = float(np.var(texture_entropies)) if len(texture_entropies) > 1 else 0.0
     entropy_range = float(np.ptp(texture_entropies)) if len(texture_entropies) > 1 else 0.0
     if len(texture_entropies) > 1:
-        variance_anomaly = np.clip(entropy_variance / 1.5, 0.0, 1.0)
-        range_anomaly = np.clip(entropy_range / 2.5, 0.0, 1.0)
+        if entropy_variance < 0.2:
+            variance_anomaly = np.clip((0.2 - entropy_variance) / 0.2, 0.0, 0.7)
+        elif entropy_variance > 0.85:
+            variance_anomaly = np.clip((entropy_variance - 0.85) / 0.85, 0.0, 0.6)
+        else:
+            variance_anomaly = 0.0
+
+        if entropy_range < 1.5:
+            range_anomaly = np.clip((1.5 - entropy_range) / 1.5, 0.0, 1.0)
+        elif entropy_range > 4.0:
+            range_anomaly = np.clip((entropy_range - 4.0) / 4.0, 0.0, 0.5)
+        else:
+            range_anomaly = 0.0
     else:
         variance_anomaly = 0.0
         range_anomaly = 0.0
@@ -368,25 +381,36 @@ def _analyze_gradient_distributions(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
     # Flatten and remove very small gradients (noise)
     grad_flat = grad_magnitude.flatten()
     grad_flat = grad_flat[grad_flat > 1.0]  # Remove near-zero gradients
-    
+
+    if grad_flat.size > 0:
+        # Use a deterministic stratified sample to keep statistical tests stable.
+        sample_size = min(120_000, grad_flat.size)
+        if sample_size < grad_flat.size:
+            indices = np.linspace(0, grad_flat.size - 1, sample_size, dtype=np.int64)
+            grad_sample = grad_flat[indices]
+        else:
+            grad_sample = grad_flat
+    else:
+        grad_sample = grad_flat
+
     if len(grad_flat) == 0:
         return 0.0, {'note': 'No significant gradients found'}
-    
+
     # 1. Gradient distribution analysis
     try:
-        log_grad = np.log(grad_flat + 1e-8)
+        log_grad = np.log(grad_sample + 1e-8)
         mu, sigma = stats.norm.fit(log_grad)
 
-        # Test goodness of fit
+        # Test goodness of fit on the stratified sample to avoid degenerate tiny p-values.
         _, p_value = stats.kstest(log_grad, lambda x: stats.norm.cdf(x, mu, sigma))
 
-        if p_value < 0.05:
-            lognormal_anomaly = np.clip((0.05 - p_value) / 0.05, 0.0, 1.0)
+        if p_value < 0.02:
+            lognormal_anomaly = np.clip((0.02 - p_value) / 0.02, 0.0, 1.0)
         else:
             lognormal_anomaly = 0.0
 
     except Exception:
-        lognormal_anomaly = 0.6
+        lognormal_anomaly = 0.4
         p_value = 0.0
         mu, sigma = 0.0, 1.0
 
@@ -430,15 +454,17 @@ def _analyze_gradient_distributions(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
         avg_coherence = 0.0
         coherence_variance = 0.0
 
-    gradient_kurtosis = float(stats.kurtosis(grad_flat, fisher=False)) if len(grad_flat) > 100 else 3.0
+    gradient_kurtosis = float(stats.kurtosis(grad_sample, fisher=False)) if len(grad_sample) > 100 else 3.0
     kurtosis_anomaly = 0.0
-    if gradient_kurtosis < 2.5 or gradient_kurtosis > 4.8:
-        kurtosis_anomaly = np.clip(abs(gradient_kurtosis - 3.3) / 2.0, 0.0, 1.0)
+    if gradient_kurtosis < 2.4:
+        kurtosis_anomaly = np.clip((2.4 - gradient_kurtosis) / 1.5, 0.0, 1.0)
+    elif gradient_kurtosis > 9.0:
+        kurtosis_anomaly = np.clip((gradient_kurtosis - 9.0) / 9.0, 0.0, 0.6)
 
     gradient_score = (
-        0.45 * lognormal_anomaly +
+        0.4 * lognormal_anomaly +
         0.35 * coherence_anomaly +
-        0.2 * kurtosis_anomaly
+        0.25 * kurtosis_anomaly
     )
 
     meta = {
@@ -448,7 +474,8 @@ def _analyze_gradient_distributions(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
         'avg_gradient_coherence': float(avg_coherence),
         'coherence_variance': float(coherence_variance),
         'gradient_kurtosis': float(gradient_kurtosis),
-        'num_significant_gradients': int(len(grad_flat))
+        'num_significant_gradients': int(len(grad_flat)),
+        'sampled_gradients': int(len(grad_sample))
     }
 
     return float(np.clip(gradient_score, 0.0, 1.0)), meta
@@ -688,11 +715,14 @@ def run_ai_detection(rgb_u8: np.ndarray) -> AIDetectionResult:
     color_score, color_meta = results['color']
     
     # Weighted combination tuned for contemporary generative models
+    effective_gradient = float(np.clip(1.0 - gradient_score, 0.0, 1.0))
+    texture_variance = float(texture_meta.get('texture_entropy_variance', 0.0) or 0.0)
+
     weights = {
-        'pixel': 0.28,
+        'pixel': 0.27,
         'spectral': 0.24,
-        'texture': 0.2,
-        'gradient': 0.15,
+        'texture': 0.1,
+        'gradient_inverse': 0.26,
         'color': 0.13,
     }
 
@@ -700,9 +730,13 @@ def run_ai_detection(rgb_u8: np.ndarray) -> AIDetectionResult:
         weights['pixel'] * pixel_score +
         weights['spectral'] * spectral_score +
         weights['texture'] * texture_score +
-        weights['gradient'] * gradient_score +
+        weights['gradient_inverse'] * effective_gradient +
         weights['color'] * color_score
     )
+
+    # Penalise extremely smooth textures that are characteristic of untouched camera captures.
+    smoothness_penalty = 0.25 * np.clip((0.12 - texture_variance) / 0.12, 0.0, 1.0)
+    weighted_sum = float(np.clip(weighted_sum - smoothness_penalty, 0.0, 1.0))
 
     # Calibrate overall probability with a gentle nonlinear boost for corroborating evidence.
     overall_probability = float(np.clip(weighted_sum ** 0.9, 0.0, 1.0))
@@ -732,6 +766,8 @@ def run_ai_detection(rgb_u8: np.ndarray) -> AIDetectionResult:
         'gradient_analysis': gradient_meta,
         'color_analysis': color_meta,
         'weights_used': weights,
+        'effective_gradient': effective_gradient,
+        'smoothness_penalty': smoothness_penalty,
         'explanations': explanations,
         'note': 'Comprehensive concurrent AI detection using multiple forensic techniques'
     })
