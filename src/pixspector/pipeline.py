@@ -324,6 +324,13 @@ def analyze_single_image(
 
     # --- Scoring ------------------------------------------------------------
     log_analysis_step(_logger, "scoring", "Starting scoring analysis")
+    log_analysis_step(_logger, "modules_available", f"Available modules for scoring: {list(modules.keys())}")
+    
+    # Log some key values before scoring
+    if "ai_detection" in modules:
+        ai_prob = modules["ai_detection"].get("overall_ai_probability", 0)
+        log_analysis_step(_logger, "pre_scoring", f"AI probability before scoring: {ai_prob}")
+    
     score = score_image(
         modules=modules,
         weights_cfg=cfg.get("rules.weights", {}),
@@ -331,7 +338,7 @@ def analyze_single_image(
         clamp_max=float(cfg.get("rules.clamp_max", 100)),
         buckets_cfg=cfg.get("rules.buckets", {}),
     )
-    log_analysis_step(_logger, "scoring", f"Scoring completed - final score: {score.suspicion_index}", score.suspicion_index)
+    log_analysis_step(_logger, "scoring", f"Scoring completed - final score: {score.suspicion_index}, bucket: {score.bucket_label}, evidence count: {len(score.evidence)}")
 
     # --- Assemble report dict ----------------------------------------------
     result: Dict[str, Any] = _convert_to_serializable({
