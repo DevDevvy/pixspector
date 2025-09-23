@@ -41,6 +41,10 @@ rules:
   clamp_min: 0
   clamp_max: 100
 
+  # Minimum overall AI probability required before individual AI component
+  # evidence contributes to the suspicion index.
+  ai_component_gate: 0.4
+
   # Adjusted buckets for AI detection
   buckets:
     low:

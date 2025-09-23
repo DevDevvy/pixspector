@@ -57,6 +57,7 @@ def score_image(
     clamp_min: float,
     clamp_max: float,
     buckets_cfg: Dict[str, Any],
+    ai_component_gate: float = 0.4,
 ) -> ScoreReport:
     """Score an analysed image by combining AI indicators and classic forensic signals."""
 
@@ -81,6 +82,9 @@ def score_image(
     gradient_score = float(ai_det.get("gradient_distribution_score", 0.0))
     color_score = float(ai_det.get("color_correlation_score", 0.0))
     ai_explanations = ai_det.get("explanations", [])
+
+    component_gate = float(ai_component_gate)
+    ai_components_enabled = overall_ai_prob >= component_gate
 
     log_analysis_step(
         logger,
@@ -118,80 +122,81 @@ def score_image(
             value=overall_ai_prob,
         )
 
-    if pixel_score >= 0.6:
-        add_evidence(
-            "ai_pixel_distribution",
-            26.0,
-            "Pixel distribution patterns indicate artificial generation.",
-            value=pixel_score,
-        )
-    elif pixel_score >= 0.45:
-        add_evidence(
-            "ai_pixel_distribution_moderate",
-            14.0,
-            "Moderate pixel distribution anomalies detected.",
-            value=pixel_score,
-        )
+    if ai_components_enabled:
+        if pixel_score >= 0.6:
+            add_evidence(
+                "ai_pixel_distribution",
+                26.0,
+                "Pixel distribution patterns indicate artificial generation.",
+                value=pixel_score,
+            )
+        elif pixel_score >= 0.45:
+            add_evidence(
+                "ai_pixel_distribution_moderate",
+                14.0,
+                "Moderate pixel distribution anomalies detected.",
+                value=pixel_score,
+            )
 
-    if spectral_score >= 0.6:
-        add_evidence(
-            "ai_spectral_anomaly",
-            24.0,
-            "Frequency domain analysis reveals AI-generated characteristics.",
-            value=spectral_score,
-        )
-    elif spectral_score >= 0.5:
-        add_evidence(
-            "ai_spectral_anomaly_moderate",
-            14.0,
-            "Moderate spectral anomalies detected.",
-            value=spectral_score,
-        )
+        if spectral_score >= 0.6:
+            add_evidence(
+                "ai_spectral_anomaly",
+                24.0,
+                "Frequency domain analysis reveals AI-generated characteristics.",
+                value=spectral_score,
+            )
+        elif spectral_score >= 0.5:
+            add_evidence(
+                "ai_spectral_anomaly_moderate",
+                14.0,
+                "Moderate spectral anomalies detected.",
+                value=spectral_score,
+            )
 
-    if texture_score >= 0.6:
-        add_evidence(
-            "ai_texture_inconsistency",
-            20.0,
-            "Texture analysis reveals patterns typical of AI-generated content.",
-            value=texture_score,
-        )
-    elif texture_score >= 0.45:
-        add_evidence(
-            "ai_texture_consistency_moderate",
-            12.0,
-            "Moderate texture anomalies detected.",
-            value=texture_score,
-        )
+        if texture_score >= 0.6:
+            add_evidence(
+                "ai_texture_inconsistency",
+                20.0,
+                "Texture analysis reveals patterns typical of AI-generated content.",
+                value=texture_score,
+            )
+        elif texture_score >= 0.45:
+            add_evidence(
+                "ai_texture_consistency_moderate",
+                12.0,
+                "Moderate texture anomalies detected.",
+                value=texture_score,
+            )
 
-    if gradient_score >= 0.55:
-        add_evidence(
-            "ai_gradient_distribution",
-            16.0,
-            "Gradient distribution patterns suggest AI synthesis.",
-            value=gradient_score,
-        )
-    elif gradient_score >= 0.4:
-        add_evidence(
-            "ai_gradient_distribution_moderate",
-            8.0,
-            "Gradient distribution shows atypical coherence patterns.",
-            value=gradient_score,
-        )
+        if gradient_score >= 0.55:
+            add_evidence(
+                "ai_gradient_distribution",
+                16.0,
+                "Gradient distribution patterns suggest AI synthesis.",
+                value=gradient_score,
+            )
+        elif gradient_score >= 0.4:
+            add_evidence(
+                "ai_gradient_distribution_moderate",
+                8.0,
+                "Gradient distribution shows atypical coherence patterns.",
+                value=gradient_score,
+            )
 
-    if color_score >= 0.5:
-        add_evidence(
-            "ai_color_correlation",
-            12.0,
-            "Color correlation patterns indicate artificial generation.",
-            value=color_score,
-        )
-    elif color_score >= 0.38:
-        add_evidence(
-            "ai_color_correlation_moderate",
-            6.0,
-            "Moderate colour anomalies detected.",
-            value=color_score,
-        )
+        if color_score >= 0.5:
+            add_evidence(
+                "ai_color_correlation",
+                12.0,
+                "Color correlation patterns indicate artificial generation.",
+                value=color_score,
+            )
+        elif color_score >= 0.38:
+            add_evidence(
+                "ai_color_correlation_moderate",
+                6.0,
+                "Moderate colour anomalies detected.",
+                value=color_score,
+            )
 
     # --- Classic forensic modules -----------------------------------------
     ela = modules.get("ela") or {}
@@ -328,9 +333,15 @@ def score_image(
     )
 
     # Notes and explanations ------------------------------------------------
-    for explanation in ai_explanations:
-        notes.append(f"AI Analysis: {explanation}")
-        log_analysis_step(logger, "explanation", explanation)
+    if ai_components_enabled:
+        for explanation in ai_explanations:
+            notes.append(f"AI Analysis: {explanation}")
+            log_analysis_step(logger, "explanation", explanation)
+    elif ai_explanations:
+        notes.append(
+            "AI detection module observed minor anomalies but below the confidence gate,"
+            " so they were not factored into scoring."
+        )
 
     if overall_ai_prob >= 0.75:
         notes.append("HIGH CONFIDENCE: Multiple AI generation signatures detected.")
@@ -346,12 +357,13 @@ def score_image(
     if not evidence:
         notes.append("No significant technical anomalies detected. Content appears authentic.")
 
-    if pixel_score >= 0.5:
-        notes.append("Pixel distribution analysis suggests artificial generation patterns.")
-    if spectral_score >= 0.5:
-        notes.append("Frequency domain analysis indicates non-natural image characteristics.")
-    if texture_score >= 0.5:
-        notes.append("Texture analysis reveals patterns typical of AI-generated content.")
+    if ai_components_enabled:
+        if pixel_score >= 0.5:
+            notes.append("Pixel distribution analysis suggests artificial generation patterns.")
+        if spectral_score >= 0.5:
+            notes.append("Frequency domain analysis indicates non-natural image characteristics.")
+        if texture_score >= 0.5:
+            notes.append("Texture analysis reveals patterns typical of AI-generated content.")
 
     return ScoreReport(
         suspicion_index=int(round(final_score)),

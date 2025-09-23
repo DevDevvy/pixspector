@@ -337,6 +337,7 @@ def analyze_single_image(
         clamp_min=float(cfg.get("rules.clamp_min", 0)),
         clamp_max=float(cfg.get("rules.clamp_max", 100)),
         buckets_cfg=cfg.get("rules.buckets", {}),
+        ai_component_gate=float(cfg.get("rules.ai_component_gate", 0.4)),
     )
     log_analysis_step(_logger, "scoring", f"Scoring completed - final score: {score.suspicion_index}, bucket: {score.bucket_label}, evidence count: {len(score.evidence)}")
 
