@@ -96,24 +96,24 @@ def score_image(
         },
     )
 
-    if overall_ai_prob >= 0.7:
+    if overall_ai_prob >= 0.75:
         add_evidence(
             "ai_detection_high",
-            45.0,
+            50.0,
             "Multiple AI signatures detected with high confidence.",
             value=overall_ai_prob,
         )
-    elif overall_ai_prob >= 0.5:
+    elif overall_ai_prob >= 0.55:
         add_evidence(
             "ai_detection_medium",
-            30.0,
+            32.0,
             "Moderate AI indicators detected.",
             value=overall_ai_prob,
         )
-    elif overall_ai_prob >= 0.3:
+    elif overall_ai_prob >= 0.4:
         add_evidence(
             "ai_detection_low",
-            15.0,
+            18.0,
             "Some AI-like characteristics detected.",
             value=overall_ai_prob,
         )
@@ -121,14 +121,14 @@ def score_image(
     if pixel_score >= 0.6:
         add_evidence(
             "ai_pixel_distribution",
-            25.0,
+            26.0,
             "Pixel distribution patterns indicate artificial generation.",
             value=pixel_score,
         )
-    elif pixel_score >= 0.4:
+    elif pixel_score >= 0.45:
         add_evidence(
             "ai_pixel_distribution_moderate",
-            12.0,
+            14.0,
             "Moderate pixel distribution anomalies detected.",
             value=pixel_score,
         )
@@ -136,14 +136,14 @@ def score_image(
     if spectral_score >= 0.6:
         add_evidence(
             "ai_spectral_anomaly",
-            20.0,
+            24.0,
             "Frequency domain analysis reveals AI-generated characteristics.",
             value=spectral_score,
         )
-    elif spectral_score >= 0.4:
+    elif spectral_score >= 0.5:
         add_evidence(
             "ai_spectral_anomaly_moderate",
-            12.0,
+            14.0,
             "Moderate spectral anomalies detected.",
             value=spectral_score,
         )
@@ -151,31 +151,45 @@ def score_image(
     if texture_score >= 0.6:
         add_evidence(
             "ai_texture_inconsistency",
-            18.0,
+            20.0,
             "Texture analysis reveals patterns typical of AI-generated content.",
             value=texture_score,
         )
-    elif texture_score >= 0.4:
+    elif texture_score >= 0.45:
         add_evidence(
             "ai_texture_consistency_moderate",
-            10.0,
+            12.0,
             "Moderate texture anomalies detected.",
             value=texture_score,
         )
 
-    if gradient_score >= 0.6:
+    if gradient_score >= 0.55:
         add_evidence(
             "ai_gradient_distribution",
-            15.0,
+            16.0,
             "Gradient distribution patterns suggest AI synthesis.",
             value=gradient_score,
         )
+    elif gradient_score >= 0.4:
+        add_evidence(
+            "ai_gradient_distribution_moderate",
+            8.0,
+            "Gradient distribution shows atypical coherence patterns.",
+            value=gradient_score,
+        )
 
-    if color_score >= 0.6:
+    if color_score >= 0.5:
         add_evidence(
             "ai_color_correlation",
-            10.0,
+            12.0,
             "Color correlation patterns indicate artificial generation.",
+            value=color_score,
+        )
+    elif color_score >= 0.38:
+        add_evidence(
+            "ai_color_correlation_moderate",
+            6.0,
+            "Moderate colour anomalies detected.",
             value=color_score,
         )
 
@@ -292,12 +306,15 @@ def score_image(
     # --- Final aggregation -------------------------------------------------
     base_score = sum(item.weight for item in evidence)
     ai_boost = 0.0
-    if overall_ai_prob >= 0.7:
-        ai_boost = 20.0
+    if overall_ai_prob >= 0.75:
+        ai_boost = 22.0
         log_analysis_step(logger, "boost", "Applying high AI confidence boost", ai_boost)
-    elif overall_ai_prob >= 0.5:
-        ai_boost = 10.0
+    elif overall_ai_prob >= 0.55:
+        ai_boost = 12.0
         log_analysis_step(logger, "boost", "Applying medium AI confidence boost", ai_boost)
+    elif overall_ai_prob >= 0.4:
+        ai_boost = 5.0
+        log_analysis_step(logger, "boost", "Applying low AI confidence boost", ai_boost)
 
     final_score = clamp(base_score + ai_boost, clamp_min, clamp_max)
     bucket = bucket_for(final_score, buckets_cfg)
@@ -315,11 +332,11 @@ def score_image(
         notes.append(f"AI Analysis: {explanation}")
         log_analysis_step(logger, "explanation", explanation)
 
-    if overall_ai_prob >= 0.7:
+    if overall_ai_prob >= 0.75:
         notes.append("HIGH CONFIDENCE: Multiple AI generation signatures detected.")
-    elif overall_ai_prob >= 0.5:
+    elif overall_ai_prob >= 0.55:
         notes.append("MODERATE CONFIDENCE: Several AI generation indicators detected.")
-    elif overall_ai_prob >= 0.3:
+    elif overall_ai_prob >= 0.4:
         notes.append("LOW CONFIDENCE: Some technical patterns suggest possible AI generation.")
     elif final_score >= 25:
         notes.append("Technical irregularities detected that may indicate manipulation.")

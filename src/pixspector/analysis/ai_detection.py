@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 import concurrent.futures
 import os
 
@@ -19,11 +19,12 @@ _logger = get_logger("analysis.ai_detection")
 @dataclass
 class AIDetectionResult:
     pixel_distribution_score: float      # [0..1] higher = more AI-like
-    spectral_anomaly_score: float       # [0..1] higher = more AI-like  
+    spectral_anomaly_score: float       # [0..1] higher = more AI-like
     texture_consistency_score: float    # [0..1] higher = more AI-like
     gradient_distribution_score: float  # [0..1] higher = more AI-like
     color_correlation_score: float      # [0..1] higher = more AI-like
     overall_ai_probability: float       # [0..1] combined AI probability
+    explanations: List[str]
     meta: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -39,64 +40,79 @@ def _analyze_pixel_distribution(rgb_u8: np.ndarray) -> Tuple[float, Dict[str, An
     
     # Analyze each channel separately
     channel_scores = []
-    channel_stats = {}
-    
+    channel_stats: Dict[str, Any] = {}
+
+    entropy_values = []
+    ks_values = []
+    gap_densities = []
+    low_high_ratios = []
+
     for ch_idx, ch_name in enumerate(['R', 'G', 'B']):
         channel = rgb[..., ch_idx].flatten()
-        
-        # 1. Test for unnaturally uniform distribution
+
+        # Histogram based characteristics -------------------------------------------------
         hist, _ = np.histogram(channel, bins=256, range=(0, 1))
         hist_norm = hist / (np.sum(hist) + 1e-8)
-        
-        # Calculate entropy - AI images often have either too high or too low entropy
-        entropy = -np.sum(hist_norm * np.log2(hist_norm + 1e-8))
-        natural_entropy_range = (6.0, 7.8)  # Typical for natural images
-        
-        if entropy < natural_entropy_range[0]:
-            entropy_anomaly = (natural_entropy_range[0] - entropy) / natural_entropy_range[0]
-        elif entropy > natural_entropy_range[1]:
-            entropy_anomaly = (entropy - natural_entropy_range[1]) / (8.0 - natural_entropy_range[1])
-        else:
-            entropy_anomaly = 0.0
-        
-        # 2. Check for clustering (AI images often have pixel values clustered)
-        # Use Kolmogorov-Smirnov test against uniform distribution
-        uniform_samples = np.random.uniform(0, 1, len(channel))
-        ks_stat, _ = stats.kstest(channel, uniform_samples)
-        
-        # 3. Check for gaps in distribution (common in AI images)
-        gaps_score = 0.0
-        for i in range(1, len(hist)):
-            if hist[i-1] > 0 and hist[i] == 0 and i < len(hist)-1 and hist[i+1] > 0:
-                gaps_score += 1.0
-        gaps_score = gaps_score / 256.0
-        
-        # 4. Statistical moments analysis
-        skewness = stats.skew(channel)
-        kurtosis = stats.kurtosis(channel) + 3  # Convert to standard kurtosis
-        
-        # AI images often have unusual higher-order moments
+
+        entropy = float(-np.sum(hist_norm * np.log2(hist_norm + 1e-8)))
+        entropy_values.append(entropy)
+
+        # Natural images centre around ~7.2 bits of entropy per channel.
+        entropy_center = 7.2
+        entropy_anomaly = np.clip(abs(entropy - entropy_center) / 1.2, 0.0, 1.0)
+
+        # Tail occupancy – AI renders often overuse saturated or very dark pixels.
+        low_high = float(hist[:6].sum() + hist[-6:].sum()) / (np.sum(hist) + 1e-8)
+        low_high_ratios.append(low_high)
+        tail_anomaly = np.clip((low_high - 0.08) / 0.12, 0.0, 1.0)
+
+        # Detect gaps (empty bins between populated regions) that indicate quantisation artefacts.
+        gap_count = 0
+        for i in range(2, len(hist) - 2):
+            if hist[i] == 0 and hist[i - 1] > 0 and hist[i + 1] > 0:
+                gap_count += 1
+        gap_density = gap_count / 256.0
+        gap_densities.append(gap_density)
+        gap_anomaly = np.clip(gap_density / 0.02, 0.0, 1.0)
+
+        # Statistical tests ----------------------------------------------------------------
+        # Compare against a smoothed empirical baseline rather than a uniform distribution.
+        reference = uniform_filter(channel.reshape(rgb_u8.shape[0], rgb_u8.shape[1]), size=5).flatten()
+        reference = reference / (np.max(reference) + 1e-8)
+        ks_stat, _ = stats.kstest(channel, reference)
+        ks_values.append(float(ks_stat))
+        ks_anomaly = np.clip(ks_stat / 0.12, 0.0, 1.0)
+
+        # Higher-order moments.
+        skewness = float(stats.skew(channel))
+        kurtosis = float(stats.kurtosis(channel, fisher=False))  # already +3
         moment_anomaly = 0.0
-        natural_skewness_range = (-0.5, 0.5)
-        natural_kurtosis_range = (2.5, 4.0)
-        
-        if not (natural_skewness_range[0] <= skewness <= natural_skewness_range[1]):
-            moment_anomaly += 0.3
-        if not (natural_kurtosis_range[0] <= kurtosis <= natural_kurtosis_range[1]):
-            moment_anomaly += 0.7
-        
-        # Combine scores for this channel
-        channel_score = 0.3 * entropy_anomaly + 0.3 * ks_stat + 0.2 * gaps_score + 0.2 * moment_anomaly
+        if abs(skewness) > 0.8:
+            moment_anomaly += np.clip((abs(skewness) - 0.8) / 1.2, 0.0, 1.0)
+        if kurtosis < 2.5 or kurtosis > 4.5:
+            moment_anomaly += np.clip(abs(kurtosis - 3.3) / 2.0, 0.0, 1.0)
+        moment_anomaly = np.clip(moment_anomaly, 0.0, 1.0)
+
+        channel_score = 0.35 * entropy_anomaly + 0.25 * ks_anomaly + 0.2 * tail_anomaly + 0.2 * gap_anomaly
         channel_scores.append(channel_score)
-        
-        # Convert numpy types to Python types for JSON serialization
-        channel_stats[f'{ch_name}_entropy'] = float(entropy)
+
+        channel_stats[f'{ch_name}_entropy'] = entropy
+        channel_stats[f'{ch_name}_low_high_ratio'] = float(low_high)
+        channel_stats[f'{ch_name}_gap_density'] = float(gap_density)
         channel_stats[f'{ch_name}_ks_stat'] = float(ks_stat)
-        channel_stats[f'{ch_name}_gaps'] = float(gaps_score)
-        channel_stats[f'{ch_name}_skewness'] = float(skewness)
-        channel_stats[f'{ch_name}_kurtosis'] = float(kurtosis)
-    
-    overall_score = np.mean(channel_scores)
+        channel_stats[f'{ch_name}_skewness'] = skewness
+        channel_stats[f'{ch_name}_kurtosis'] = kurtosis
+
+    overall_score = float(np.mean(channel_scores)) if channel_scores else 0.0
+    summary_meta = {
+        'avg_entropy': float(np.mean(entropy_values)) if entropy_values else 0.0,
+        'entropy_stdev': float(np.std(entropy_values)) if entropy_values else 0.0,
+        'avg_ks_stat': float(np.mean(ks_values)) if ks_values else 0.0,
+        'avg_gap_density': float(np.mean(gap_densities)) if gap_densities else 0.0,
+        'avg_low_high_ratio': float(np.mean(low_high_ratios)) if low_high_ratios else 0.0,
+    }
+    channel_stats.update(summary_meta)
+
     return float(np.clip(overall_score, 0.0, 1.0)), channel_stats
 
 
@@ -123,7 +139,7 @@ def _analyze_spectral_characteristics(rgb_u8: np.ndarray) -> Tuple[float, Dict[s
     center_y, center_x = h // 2, w // 2
     y, x = np.ogrid[:h, :w]
     r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
-    
+
     # Calculate radial average
     r_int = r.astype(int)
     max_r = min(center_x, center_y)
@@ -131,33 +147,43 @@ def _analyze_spectral_characteristics(rgb_u8: np.ndarray) -> Tuple[float, Dict[s
                               for i in range(max_r) if np.any(r_int == i)])
     
     # 2. Check for AI-specific spectral signatures
+    slope = 0.0
+    r_value = 0.0
+    slope_anomaly = 0.0
+    high_freq_ratio = 0.0
+    ring_strength = 0.0
+
     if len(radial_profile) > 10:
-        # Fit power law to radial profile
         freqs = np.arange(1, len(radial_profile) + 1)
         try:
-            # Natural images typically follow f^(-2) power law
-            log_freqs = np.log(freqs[1:])  # Skip DC
-            log_profile = radial_profile[1:]
-            
-            # Linear regression in log space
+            log_freqs = np.log(freqs[1:])
+            log_profile = np.log(np.clip(radial_profile[1:], 1e-8, None))
+
             slope, intercept, r_value, _, _ = stats.linregress(log_freqs, log_profile)
-            
-            # Natural images: slope around -1.5 to -2.5
-            natural_slope_range = (-2.5, -1.5)
-            if slope < natural_slope_range[0] or slope > natural_slope_range[1]:
-                slope_anomaly = min(1.0, abs(slope - np.mean(natural_slope_range)) / 2.0)
-            else:
-                slope_anomaly = 0.0
-                
-        except:
-            slope_anomaly = 0.0
+            slope_anomaly = np.clip(abs(slope + 2.0) / 1.0, 0.0, 1.0)
+        except Exception:
             slope = 0.0
             r_value = 0.0
+            slope_anomaly = 0.0
+
+        # High-frequency energy ratio: AI renders tend to retain excess HF energy.
+        energy = radial_profile**2
+        total_energy = np.sum(energy) + 1e-8
+        split_idx = max(5, int(0.35 * len(energy)))
+        high_freq_ratio = float(np.sum(energy[split_idx:]) / total_energy)
+        if high_freq_ratio > 0.2:
+            hf_anomaly = np.clip((high_freq_ratio - 0.2) / 0.25, 0.0, 1.0)
+        else:
+            hf_anomaly = np.clip((0.15 - high_freq_ratio) / 0.15, 0.0, 0.6)
+
+        # Periodic ring detection (variance of radial profile after smoothing)
+        smoothed = uniform_filter(radial_profile, size=5)
+        ring_strength = float(np.std(radial_profile - smoothed))
+        ring_anomaly = np.clip(ring_strength / 5.0, 0.0, 1.0)
     else:
-        slope_anomaly = 0.0
-        slope = 0.0
-        r_value = 0.0
-    
+        hf_anomaly = 0.0
+        ring_anomaly = 0.0
+
     # 3. Directional analysis
     angles = np.arctan2(y - center_y, x - center_x)
     angle_bins = 8
@@ -177,28 +203,30 @@ def _analyze_spectral_characteristics(rgb_u8: np.ndarray) -> Tuple[float, Dict[s
         else:
             angle_energies.append(0.0)
     
-    # Natural images have more varied directional content
     if len(angle_energies) > 0:
-        directional_variance = np.var(angle_energies) / (np.mean(angle_energies) + 1e-8)
-        # AI images often have too uniform directional content
-        if directional_variance < 0.1:  # Too uniform
-            directional_anomaly = (0.1 - directional_variance) / 0.1
-        else:
-            directional_anomaly = 0.0
+        directional_variance = float(np.var(angle_energies) / (np.mean(angle_energies) + 1e-8))
+        directional_uniformity = np.clip((0.2 - directional_variance) / 0.2, 0.0, 1.0)
     else:
-        directional_anomaly = 0.0
         directional_variance = 0.0
-    
-    # Combine spectral anomalies
-    spectral_score = 0.6 * slope_anomaly + 0.4 * directional_anomaly
-    
+        directional_uniformity = 0.0
+
+    # Combine spectral anomalies placing emphasis on slope and HF ratio.
+    spectral_score = (
+        0.45 * slope_anomaly +
+        0.3 * hf_anomaly +
+        0.15 * ring_anomaly +
+        0.1 * directional_uniformity
+    )
+
     meta = {
         'power_law_slope': float(slope),
         'power_law_r2': float(r_value**2),
+        'high_frequency_energy_ratio': float(high_freq_ratio),
+        'ring_strength': float(ring_strength),
         'directional_variance': float(directional_variance),
         'radial_profile_length': int(len(radial_profile))
     }
-    
+
     return float(np.clip(spectral_score, 0.0, 1.0)), meta
 
 
@@ -245,69 +273,83 @@ def _analyze_local_texture_patterns(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
     
     # Calculate LBP
     lbp = calculate_lbp(gray)
-    
+
     # Analyze LBP histogram
     lbp_hist, _ = np.histogram(lbp.flatten(), bins=256, range=(0, 256))
     lbp_hist = lbp_hist.astype(np.float64) / (np.sum(lbp_hist) + 1e-8)
-    
-    # 1. Uniform patterns analysis
-    # Natural images have more uniform LBP patterns
+
+    # 1. Uniform pattern prevalence ------------------------------------------------------
     uniform_patterns = 0.0
     for i in range(256):
-        # Count transitions in binary representation
         binary = format(i, '08b')
-        transitions = sum(binary[j] != binary[(j+1) % 8] for j in range(8))
+        transitions = sum(binary[j] != binary[(j + 1) % 8] for j in range(8))
         if transitions <= 2:
             uniform_patterns += lbp_hist[i]
-    
-    # AI images often have fewer uniform patterns
-    if uniform_patterns < 0.6:  # Threshold for natural images
-        uniform_anomaly = (0.6 - uniform_patterns) / 0.6
-    else:
-        uniform_anomaly = 0.0
-    
-    # 2. Spatial consistency of textures
+
+    uniform_anomaly = 0.0
+    if uniform_patterns < 0.55:
+        uniform_anomaly = np.clip((0.55 - uniform_patterns) / 0.55, 0.0, 1.0)
+    elif uniform_patterns > 0.8:
+        uniform_anomaly = np.clip((uniform_patterns - 0.8) / 0.2, 0.0, 1.0)
+
+    # 2. Patch entropy variance ----------------------------------------------------------
     h, w = gray.shape
-    patch_size = min(32, h//4, w//4)  # Ensure patch fits in image
-    if patch_size < 8:  # Too small image
+    patch_size = min(48, max(16, min(h, w) // 6))
+    if patch_size < 12:
         return 0.0, {'note': 'Image too small for texture analysis'}
-    
-    texture_consistency_scores = []
-    
-    step_size = max(1, patch_size // 2)
+
+    texture_entropies: List[float] = []
+    step_size = max(8, patch_size // 2)
     for y in range(0, h - patch_size + 1, step_size):
         for x in range(0, w - patch_size + 1, step_size):
             patch = gray[y:y + patch_size, x:x + patch_size]
-            if patch.shape[0] == patch_size and patch.shape[1] == patch_size:
-                try:
-                    patch_lbp = calculate_lbp(patch)
-                    patch_hist, _ = np.histogram(patch_lbp.flatten(), bins=256, range=(0, 256))
-                    patch_hist = patch_hist.astype(np.float64) / (np.sum(patch_hist) + 1e-8)
-                    
-                    # Calculate entropy of this patch
-                    patch_entropy = -np.sum(patch_hist * np.log2(patch_hist + 1e-8))
-                    texture_consistency_scores.append(patch_entropy)
-                except Exception:
-                    # Skip problematic patches
-                    continue
-    
-    if len(texture_consistency_scores) > 1:
-        # AI images often have very inconsistent texture entropy across patches
-        texture_variance = np.var(texture_consistency_scores)
-        # High variance indicates inconsistent AI-generated textures
-        texture_anomaly = min(1.0, texture_variance / 2.0)  # Normalize
+            if patch.shape[0] != patch_size or patch.shape[1] != patch_size:
+                continue
+            try:
+                patch_lbp = calculate_lbp(patch)
+                patch_hist, _ = np.histogram(patch_lbp.flatten(), bins=256, range=(0, 256))
+                patch_hist = patch_hist.astype(np.float64) / (np.sum(patch_hist) + 1e-8)
+                patch_entropy = float(-np.sum(patch_hist * np.log2(patch_hist + 1e-8)))
+                texture_entropies.append(patch_entropy)
+            except Exception:
+                continue
+
+    entropy_variance = float(np.var(texture_entropies)) if len(texture_entropies) > 1 else 0.0
+    entropy_range = float(np.ptp(texture_entropies)) if len(texture_entropies) > 1 else 0.0
+    if len(texture_entropies) > 1:
+        variance_anomaly = np.clip(entropy_variance / 1.5, 0.0, 1.0)
+        range_anomaly = np.clip(entropy_range / 2.5, 0.0, 1.0)
     else:
-        texture_anomaly = 0.0
-    
-    overall_texture_score = 0.5 * uniform_anomaly + 0.5 * texture_anomaly
-    
+        variance_anomaly = 0.0
+        range_anomaly = 0.0
+
+    # 3. Micro contrast stability --------------------------------------------------------
+    laplacian = cv2.Laplacian(gray, cv2.CV_32F)
+    lap_energy = float(np.mean(np.abs(laplacian)))
+    # AI renders often oversharpen or under sharpen compared to camera captures.
+    if lap_energy < 12.0:
+        contrast_anomaly = np.clip((12.0 - lap_energy) / 12.0, 0.0, 0.8)
+    elif lap_energy > 30.0:
+        contrast_anomaly = np.clip((lap_energy - 30.0) / 25.0, 0.0, 1.0)
+    else:
+        contrast_anomaly = 0.0
+
+    overall_texture_score = (
+        0.4 * uniform_anomaly +
+        0.35 * variance_anomaly +
+        0.15 * range_anomaly +
+        0.1 * contrast_anomaly
+    )
+
     meta = {
         'uniform_patterns_ratio': float(uniform_patterns),
-        'texture_entropy_variance': float(texture_variance if 'texture_variance' in locals() else 0.0),
-        'avg_texture_entropy': float(np.mean(texture_consistency_scores) if texture_consistency_scores else 0.0),
-        'patch_count': len(texture_consistency_scores)
+        'texture_entropy_variance': float(entropy_variance),
+        'texture_entropy_range': float(entropy_range),
+        'avg_texture_entropy': float(np.mean(texture_entropies)) if texture_entropies else 0.0,
+        'patch_count': len(texture_entropies),
+        'laplacian_energy': float(lap_energy)
     }
-    
+
     return float(np.clip(overall_texture_score, 0.0, 1.0)), meta
 
 
@@ -334,21 +376,20 @@ def _analyze_gradient_distributions(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
     try:
         log_grad = np.log(grad_flat + 1e-8)
         mu, sigma = stats.norm.fit(log_grad)
-        
+
         # Test goodness of fit
         _, p_value = stats.kstest(log_grad, lambda x: stats.norm.cdf(x, mu, sigma))
-        
-        # Natural images typically have good log-normal fit (p > 0.01)
-        if p_value < 0.01:
-            lognormal_anomaly = 1.0 - p_value / 0.01
+
+        if p_value < 0.05:
+            lognormal_anomaly = np.clip((0.05 - p_value) / 0.05, 0.0, 1.0)
         else:
             lognormal_anomaly = 0.0
-            
-    except:
-        lognormal_anomaly = 0.5  # Moderate suspicion if fitting fails
+
+    except Exception:
+        lognormal_anomaly = 0.6
         p_value = 0.0
         mu, sigma = 0.0, 1.0
-    
+
     # 2. Gradient direction coherence
     grad_direction = np.arctan2(grad_y, grad_x)
     
@@ -376,32 +417,40 @@ def _analyze_gradient_distributions(rgb_u8: np.ndarray) -> Tuple[float, Dict[str
                 coherence_scores.append(coherence)
     
     if len(coherence_scores) > 0:
-        avg_coherence = np.mean(coherence_scores)
-        coherence_variance = np.var(coherence_scores)
-        
-        # AI images often have either too high or too low coherence variance
-        if coherence_variance > 0.15 or avg_coherence < 0.2:
-            coherence_anomaly = min(1.0, max(coherence_variance / 0.15, 
-                                           (0.2 - avg_coherence) / 0.2))
+        avg_coherence = float(np.mean(coherence_scores))
+        coherence_variance = float(np.var(coherence_scores))
+        if coherence_variance > 0.12:
+            coherence_anomaly = np.clip((coherence_variance - 0.12) / 0.2, 0.0, 1.0)
+        elif avg_coherence < 0.25:
+            coherence_anomaly = np.clip((0.25 - avg_coherence) / 0.25, 0.0, 1.0)
         else:
             coherence_anomaly = 0.0
     else:
         coherence_anomaly = 0.0
         avg_coherence = 0.0
         coherence_variance = 0.0
-    
-    # Combine gradient anomalies
-    gradient_score = 0.6 * lognormal_anomaly + 0.4 * coherence_anomaly
-    
+
+    gradient_kurtosis = float(stats.kurtosis(grad_flat, fisher=False)) if len(grad_flat) > 100 else 3.0
+    kurtosis_anomaly = 0.0
+    if gradient_kurtosis < 2.5 or gradient_kurtosis > 4.8:
+        kurtosis_anomaly = np.clip(abs(gradient_kurtosis - 3.3) / 2.0, 0.0, 1.0)
+
+    gradient_score = (
+        0.45 * lognormal_anomaly +
+        0.35 * coherence_anomaly +
+        0.2 * kurtosis_anomaly
+    )
+
     meta = {
         'lognormal_p_value': float(p_value),
         'lognormal_mu': float(mu),
         'lognormal_sigma': float(sigma),
         'avg_gradient_coherence': float(avg_coherence),
         'coherence_variance': float(coherence_variance),
+        'gradient_kurtosis': float(gradient_kurtosis),
         'num_significant_gradients': int(len(grad_flat))
     }
-    
+
     return float(np.clip(gradient_score, 0.0, 1.0)), meta
 
 
@@ -428,86 +477,67 @@ def _analyze_color_channel_correlations(rgb_u8: np.ndarray) -> Tuple[float, Dict
     # 1. Channel correlation analysis
     try:
         corr_matrix = np.corrcoef(rgb_valid.T)
-        
-        # Handle potential NaN values
         if np.any(np.isnan(corr_matrix)):
             return 0.0, {'note': 'Correlation calculation failed'}
-        
-        # Extract correlations
-        rg_corr = corr_matrix[0, 1]  # Red-Green
-        rb_corr = corr_matrix[0, 2]  # Red-Blue  
-        gb_corr = corr_matrix[1, 2]  # Green-Blue
-        
+        rg_corr = float(corr_matrix[0, 1])
+        rb_corr = float(corr_matrix[0, 2])
+        gb_corr = float(corr_matrix[1, 2])
     except Exception:
         return 0.0, {'note': 'Correlation analysis failed'}
-    
-    # Natural images typically have moderate positive correlations
-    natural_corr_range = (0.3, 0.8)
-    
+
+    natural_corr_range = (0.35, 0.85)
     corr_anomalies = []
     for corr in [rg_corr, rb_corr, gb_corr]:
         if np.isnan(corr):
-            corr_anomalies.append(0.5)  # Moderate suspicion for NaN
+            corr_anomalies.append(0.6)
         elif corr < natural_corr_range[0]:
-            corr_anomalies.append((natural_corr_range[0] - corr) / natural_corr_range[0])
+            corr_anomalies.append(np.clip((natural_corr_range[0] - corr) / natural_corr_range[0], 0.0, 1.0))
         elif corr > natural_corr_range[1]:
-            corr_anomalies.append((corr - natural_corr_range[1]) / (1.0 - natural_corr_range[1]))
+            corr_anomalies.append(np.clip((corr - natural_corr_range[1]) / (1.0 - natural_corr_range[1] + 1e-8), 0.0, 1.0))
         else:
             corr_anomalies.append(0.0)
-    
-    correlation_anomaly = np.mean(corr_anomalies)
-    
+
+    correlation_anomaly = float(np.mean(corr_anomalies))
+
     # 2. Color distribution analysis in different color spaces
+    saturation_anomaly = 0.0
+    hue_spread = 0.0
+    sat_bimodality = 0.0
     try:
-        # Convert to HSV for additional analysis
         rgb_img = rgb_u8.reshape(rgb_u8.shape[0], rgb_u8.shape[1], 3)
         hsv = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2HSV)
         hsv_flat = hsv.reshape(-1, 3).astype(np.float64)
-        
-        # Analyze saturation distribution
+
         saturation = hsv_flat[:, 1] / 255.0
-        
-        # Natural images have a characteristic saturation distribution
-        sat_hist, _ = np.histogram(saturation, bins=50, range=(0, 1))
+        hue = hsv_flat[:, 0] / 180.0
+
+        sat_hist, _ = np.histogram(saturation, bins=40, range=(0, 1))
         sat_hist = sat_hist.astype(np.float64) / (np.sum(sat_hist) + 1e-8)
-        
-        # AI images often have bimodal or too uniform saturation
-        # Check for modes in saturation
-        sat_peaks = []
-        for i in range(1, len(sat_hist) - 1):
-            if sat_hist[i] > sat_hist[i-1] and sat_hist[i] > sat_hist[i+1] and sat_hist[i] > 0.01:
-                sat_peaks.append((i, sat_hist[i]))
-        
-        # Sort peaks by height
-        sat_peaks.sort(key=lambda x: x[1], reverse=True)
-        
-        if len(sat_peaks) >= 2:
-            # Check if we have strong bimodal distribution (AI characteristic)
-            first_peak, second_peak = sat_peaks[0][1], sat_peaks[1][1]
-            if second_peak > 0.3 * first_peak:  # Significant second peak
-                saturation_anomaly = min(1.0, second_peak / first_peak)
-            else:
-                saturation_anomaly = 0.0
+
+        smooth_hist = uniform_filter(sat_hist, size=3)
+        sat_bimodality = float(np.std(sat_hist - smooth_hist))
+        saturation_anomaly = np.clip(sat_bimodality / 0.05, 0.0, 1.0)
+
+        hue_spread = float(np.std(hue))
+        if hue_spread < 0.08:
+            hue_anomaly = np.clip((0.08 - hue_spread) / 0.08, 0.0, 0.8)
         else:
-            # Too few peaks might also be suspicious
-            saturation_anomaly = 0.2
-            
+            hue_anomaly = 0.0
     except Exception:
-        saturation_anomaly = 0.0
-        sat_peaks = []
-    
-    # Combine color anomalies
-    color_score = 0.7 * correlation_anomaly + 0.3 * saturation_anomaly
-    
+        hue_anomaly = 0.0
+
+    color_score = 0.55 * correlation_anomaly + 0.25 * saturation_anomaly + 0.2 * hue_anomaly
+
     meta = {
-        'rg_correlation': float(rg_corr) if not np.isnan(rg_corr) else None,
-        'rb_correlation': float(rb_corr) if not np.isnan(rb_corr) else None,
-        'gb_correlation': float(gb_corr) if not np.isnan(gb_corr) else None,
-        'saturation_peaks': int(len(sat_peaks)),
+        'rg_correlation': rg_corr,
+        'rb_correlation': rb_corr,
+        'gb_correlation': gb_corr,
+        'saturation_bimodality': float(sat_bimodality),
+        'hue_spread': float(hue_spread),
         'valid_pixels': int(np.sum(valid_pixels)),
         'total_pixels': int(rgb.shape[0])
     }
-    
+
     return float(np.clip(color_score, 0.0, 1.0)), meta
 
 
@@ -537,53 +567,79 @@ def _generate_explanations(pixel_score: float, pixel_meta: Dict,
     explanations = []
     
     # Pixel distribution analysis
+    avg_entropy = float(pixel_meta.get('avg_entropy', 0.0) or 0.0)
+    low_high_ratio = float(pixel_meta.get('avg_low_high_ratio', 0.0) or 0.0)
+    ks_stat = float(pixel_meta.get('avg_ks_stat', 0.0) or 0.0)
     if pixel_score >= 0.7:
-        avg_entropy = pixel_meta.get('avg_entropy', 0)
-        explanations.append(f"Pixel distribution is extremely uniform (entropy={avg_entropy:.2f}), strongly indicating AI generation")
-        log_analysis_step(_logger, "pixel", f"High uniformity detected - entropy={avg_entropy:.2f}", pixel_score)
+        explanations.append(
+            f"Pixel statistics deviate from natural camera captures (entropy={avg_entropy:.2f}, tail ratio={low_high_ratio:.2f})."
+        )
+        log_analysis_step(_logger, "pixel", "High pixel distribution anomaly", pixel_score,
+                          entropy=avg_entropy, tail_ratio=low_high_ratio, ks=ks_stat)
     elif pixel_score >= 0.5:
-        explanations.append(f"Pixel distribution shows moderate uniformity patterns typical of AI (score={pixel_score:.2f})")
-        log_analysis_step(_logger, "pixel", f"Moderate AI patterns in pixel distribution", pixel_score)
-    elif pixel_score >= 0.3:
-        explanations.append(f"Some pixel distribution irregularities detected")
-        log_analysis_step(_logger, "pixel", f"Minor pixel distribution anomalies", pixel_score)
-    
+        explanations.append("Pixel distribution shows moderate irregularities consistent with AI generation.")
+        log_analysis_step(_logger, "pixel", "Moderate pixel distribution anomalies", pixel_score,
+                          entropy=avg_entropy, ks=ks_stat)
+    elif pixel_score >= 0.35:
+        explanations.append("Pixel distribution contains slight banding/quantisation artefacts.")
+        log_analysis_step(_logger, "pixel", "Low pixel anomaly", pixel_score)
+
     # Spectral analysis
-    if spectral_score >= 0.7:
-        periodicity = spectral_meta.get('periodicity_strength', 0)
-        explanations.append(f"Frequency spectrum shows strong periodic patterns (strength={periodicity:.2f}) characteristic of AI synthesis")
-        log_analysis_step(_logger, "spectral", f"Strong periodic patterns detected", spectral_score, periodicity=periodicity)
+    high_freq_ratio = float(spectral_meta.get('high_frequency_energy_ratio', 0.0) or 0.0)
+    ring_strength = float(spectral_meta.get('ring_strength', 0.0) or 0.0)
+    slope = float(spectral_meta.get('power_law_slope', 0.0) or 0.0)
+    if spectral_score >= 0.65:
+        explanations.append(
+            f"Frequency spectrum retains excess high-frequency energy (ratio={high_freq_ratio:.2f}) and shows synthetic ringing."
+        )
+        log_analysis_step(_logger, "spectral", "High spectral anomaly", spectral_score,
+                          high_freq_ratio=high_freq_ratio, ring_strength=ring_strength, slope=slope)
     elif spectral_score >= 0.5:
-        explanations.append(f"Frequency domain shows moderate AI-like artifacts (score={spectral_score:.2f})")
-        log_analysis_step(_logger, "spectral", f"Moderate spectral anomalies", spectral_score)
-    
+        explanations.append("Frequency domain shows moderate deviations from camera power spectrum.")
+        log_analysis_step(_logger, "spectral", "Moderate spectral anomalies", spectral_score,
+                          slope=slope)
+
     # Texture analysis
-    if texture_score >= 0.7:
-        variance_ratio = texture_meta.get('texture_variance_ratio', 0)
-        explanations.append(f"Texture patterns are unnaturally consistent (variance ratio={variance_ratio:.2f}), indicating AI generation")
-        log_analysis_step(_logger, "texture", f"Unnatural texture consistency", texture_score, variance_ratio=variance_ratio)
+    entropy_var = float(texture_meta.get('texture_entropy_variance', 0.0) or 0.0)
+    lap_energy = float(texture_meta.get('laplacian_energy', 0.0) or 0.0)
+    if texture_score >= 0.65:
+        explanations.append(
+            f"Micro-textures fluctuate unnaturally (entropy variance={entropy_var:.2f}), a hallmark of AI synthesis."
+        )
+        log_analysis_step(_logger, "texture", "High texture anomaly", texture_score,
+                          entropy_variance=entropy_var, laplacian=lap_energy)
     elif texture_score >= 0.5:
-        explanations.append(f"Texture analysis reveals moderate AI-like characteristics")
-        log_analysis_step(_logger, "texture", f"Moderate texture anomalies", texture_score)
-    
-    # Gradient analysis  
-    if gradient_score >= 0.7:
-        kurtosis = gradient_meta.get('gradient_kurtosis', 0)
-        explanations.append(f"Gradient distribution is highly atypical (kurtosis={kurtosis:.2f}), suggesting AI synthesis")
-        log_analysis_step(_logger, "gradient", f"Atypical gradient distribution", gradient_score, kurtosis=kurtosis)
-    elif gradient_score >= 0.5:
-        explanations.append(f"Gradient patterns show moderate AI indicators")
-        log_analysis_step(_logger, "gradient", f"Moderate gradient anomalies", gradient_score)
-    
+        explanations.append("Texture statistics vary more than typical photographs.")
+        log_analysis_step(_logger, "texture", "Moderate texture anomaly", texture_score)
+
+    # Gradient analysis
+    gradient_kurtosis = float(gradient_meta.get('gradient_kurtosis', 3.0) or 3.0)
+    p_value = float(gradient_meta.get('lognormal_p_value', 1.0) or 1.0)
+    if gradient_score >= 0.6:
+        explanations.append(
+            f"Gradient magnitudes diverge from a natural log-normal distribution (p={p_value:.3f}, kurtosis={gradient_kurtosis:.2f})."
+        )
+        log_analysis_step(_logger, "gradient", "High gradient anomaly", gradient_score,
+                          lognormal_p=p_value, kurtosis=gradient_kurtosis)
+    elif gradient_score >= 0.45:
+        explanations.append("Edge structure shows moderate synthetic coherence patterns.")
+        log_analysis_step(_logger, "gradient", "Moderate gradient anomaly", gradient_score)
+
     # Color correlation analysis
-    if color_score >= 0.6:
-        rg_corr = color_meta.get('rg_correlation', 0)
-        explanations.append(f"Color channel correlations are abnormal (R-G correlation={rg_corr:.2f}), typical of AI processing")
-        log_analysis_step(_logger, "color", f"Abnormal color correlations", color_score, rg_correlation=rg_corr)
+    rg_corr = float(color_meta.get('rg_correlation', 0.0) or 0.0)
+    sat_bimodality = float(color_meta.get('saturation_bimodality', 0.0) or 0.0)
+    hue_spread = float(color_meta.get('hue_spread', 0.0) or 0.0)
+    if color_score >= 0.55:
+        explanations.append(
+            f"Colour channels are tightly coupled (R-G corr={rg_corr:.2f}) with stylised saturation patterns (bimodality={sat_bimodality:.3f})."
+        )
+        log_analysis_step(_logger, "color", "High color anomaly", color_score,
+                          rg_correlation=rg_corr, saturation_bimodality=sat_bimodality)
     elif color_score >= 0.4:
-        explanations.append(f"Color analysis shows minor AI-like characteristics")
-        log_analysis_step(_logger, "color", f"Minor color anomalies", color_score)
-    
+        explanations.append("Colour relationships deviate mildly from camera captures.")
+        log_analysis_step(_logger, "color", "Moderate color anomaly", color_score,
+                          hue_spread=hue_spread)
+
     return explanations
 
 
@@ -631,22 +687,25 @@ def run_ai_detection(rgb_u8: np.ndarray) -> AIDetectionResult:
     gradient_score, gradient_meta = results['gradient']
     color_score, color_meta = results['color']
     
-    # Enhanced weighted combination - adjusted for better AI detection
+    # Weighted combination tuned for contemporary generative models
     weights = {
-        'pixel': 0.35,      # Increased - pixel patterns are very telling for AI
-        'spectral': 0.30,   # Increased - frequency domain is crucial
-        'texture': 0.20,    # Maintained
-        'gradient': 0.10,   # Decreased
-        'color': 0.05       # Decreased - least reliable
+        'pixel': 0.28,
+        'spectral': 0.24,
+        'texture': 0.2,
+        'gradient': 0.15,
+        'color': 0.13,
     }
-    
-    overall_probability = (
+
+    weighted_sum = (
         weights['pixel'] * pixel_score +
         weights['spectral'] * spectral_score +
         weights['texture'] * texture_score +
         weights['gradient'] * gradient_score +
         weights['color'] * color_score
     )
+
+    # Calibrate overall probability with a gentle nonlinear boost for corroborating evidence.
+    overall_probability = float(np.clip(weighted_sum ** 0.9, 0.0, 1.0))
     
     # Generate explanations and log them
     explanations = _generate_explanations(
@@ -684,5 +743,6 @@ def run_ai_detection(rgb_u8: np.ndarray) -> AIDetectionResult:
         gradient_distribution_score=float(gradient_score),
         color_correlation_score=float(color_score),
         overall_ai_probability=float(overall_probability),
+        explanations=list(explanations),
         meta=combined_meta
     )
