@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Image Authenticity Report",
+  "type": "object",
+  "required": [
+    "input",
+    "sha256",
+    "metadata",
+    "provenance",
+    "watermark",
+    "forensics",
+    "decision",
+    "version"
+  ],
+  "properties": {
+    "input": {"type": "string"},
+    "sha256": {"type": "string"},
+    "intake": {"type": "object"},
+    "image": {
+      "type": "object",
+      "required": ["width", "height", "scale_factor"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "scale_factor": {"type": "number", "minimum": 0}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "format": {"type": ["string", "null"]},
+        "size": {"type": ["integer", "null"]},
+        "icc_profile_present": {"type": ["boolean", "null"]},
+        "icc_description": {"type": ["string", "null"]},
+        "jpeg_subsampling": {"type": ["string", "null"]},
+        "jpeg_quant_tables_present": {"type": ["boolean", "null"]},
+        "exif": {}
+      }
+    },
+    "c2pa": {"type": "object"},
+    "provenance": {
+      "type": "object",
+      "required": ["c2pa_valid", "exif_consistent"],
+      "properties": {
+        "c2pa_valid": {"type": "boolean"},
+        "c2pa_signature_status": {"type": ["string", "null"]},
+        "c2pa_certificate_status": {"type": ["string", "null"]},
+        "c2pa_timestamp_status": {"type": ["string", "null"]},
+        "c2pa_claim_generator": {"type": ["string", "null"]},
+        "c2pa_software_agents": {"type": "array", "items": {}},
+        "c2pa_actions": {"type": "array", "items": {}},
+        "c2pa_ai_assertion": {"type": "array", "items": {}},
+        "exif_consistent": {"type": "boolean"}
+      }
+    },
+    "watermark": {
+      "type": "object",
+      "required": ["hits", "max_confidence", "schemes_checked", "detectors", "notes"],
+      "properties": {
+        "hits": {"type": "array", "items": {"type": "object"}},
+        "max_confidence": {"type": "number", "minimum": 0},
+        "schemes_checked": {"type": "array", "items": {"type": "string"}},
+        "detectors": {"type": "array", "items": {"type": "object"}},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "forensics": {
+      "type": "object",
+      "required": ["modules", "suspicion_index", "bucket_label", "evidence", "notes"],
+      "properties": {
+        "modules": {"type": "object"},
+        "suspicion_index": {"type": "number", "minimum": 0, "maximum": 100},
+        "bucket_label": {"type": "string"},
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "weight", "rationale"],
+            "properties": {
+              "key": {"type": "string"},
+              "weight": {"type": "number"},
+              "rationale": {"type": "string"},
+              "value": {}
+            }
+          }
+        },
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "ml_signals": {"type": ["object", "null"]},
+    "decision": {
+      "type": "object",
+      "required": ["confidence_level", "rationale"],
+      "properties": {
+        "confidence_level": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "INDETERMINATE"]
+        },
+        "rationale": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        }
+      }
+    },
+    "artifacts_dir": {"type": "string"},
+    "version": {"type": "string"}
+  },
+  "additionalProperties": true
+}
