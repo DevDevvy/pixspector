@@ -43,6 +43,28 @@ class Config:
         return key in self.data
 
 
+@dataclass(frozen=True)
+class SandboxConfig:
+    enabled: bool = True
+    max_file_size_mb: int = 50
+    max_decode_pixels: int = 50_000_000
+    max_memory_mb: int = 512
+    max_cpu_seconds: int = 5
+    worker_timeout_seconds: int = 10
+
+    @classmethod
+    def from_config(cls, cfg: "Config") -> "SandboxConfig":
+        raw = cfg.get("sandbox", {}) or {}
+        return cls(
+            enabled=bool(raw.get("enabled", cls.enabled)),
+            max_file_size_mb=int(raw.get("max_file_size_mb", cls.max_file_size_mb)),
+            max_decode_pixels=int(raw.get("max_decode_pixels", cls.max_decode_pixels)),
+            max_memory_mb=int(raw.get("max_memory_mb", cls.max_memory_mb)),
+            max_cpu_seconds=int(raw.get("max_cpu_seconds", cls.max_cpu_seconds)),
+            worker_timeout_seconds=int(raw.get("worker_timeout_seconds", cls.worker_timeout_seconds)),
+        )
+
+
 def _read_yaml(path: Path) -> Dict[str, Any]:
     with open(path, "r") as f:
         return yaml.safe_load(f) or {}

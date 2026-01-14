@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
-from PIL import Image
 
+from ..config import SandboxConfig
+from .sandbox import secure_load_image
 
 @dataclass
 class LoadedImage:
@@ -41,7 +42,11 @@ def _maybe_downscale(img_bgr: np.ndarray, max_dim: int) -> Tuple[np.ndarray, flo
     return img_bgr, scale
 
 
-def load_image(path: Path, max_dim: int = 4096) -> LoadedImage:
+def load_image(
+    path: Path,
+    max_dim: int = 4096,
+    sandbox: Optional[SandboxConfig] = None,
+) -> LoadedImage:
     """
     Robust image loader (JPEG/PNG/TIFF/WEBP/HEIC* if OpenCV supports).
     Returns BGR/RGB/GRAY plus SHA-256 and scale info.
@@ -49,10 +54,8 @@ def load_image(path: Path, max_dim: int = 4096) -> LoadedImage:
     if not path.exists():
         raise FileNotFoundError(path)
 
-    # Use PIL to robustly decode + handle color profiles, then convert to OpenCV arrays.
-    with Image.open(path) as im:
-        im = im.convert("RGB")
-        rgb = np.array(im)  # uint8 RGB
+    decoded = secure_load_image(path, sandbox)
+    rgb = np.frombuffer(decoded.data, dtype=np.uint8).reshape(decoded.height, decoded.width, 3)
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     bgr, scale = _maybe_downscale(bgr, max_dim=max_dim)
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
