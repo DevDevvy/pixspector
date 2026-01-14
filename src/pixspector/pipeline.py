@@ -10,6 +10,7 @@ import concurrent.futures
 
 import cv2
 import numpy as np
+from jsonschema import Draft7Validator
 
 from .config import Config, SandboxConfig
 from .core.image_io import load_image, to_float32, ensure_color, LoadedImage
@@ -27,6 +28,7 @@ from .analysis.fft_checks import run_fft_checks
 from .analysis.ai_detection import run_ai_detection
 from .analysis.watermark import run_watermark_detection
 
+from .decision.policy import evaluate_decision
 from .scoring.rules import score_image
 from .utils.visuals import (
     save_image_png,
@@ -41,6 +43,21 @@ from .utils.logging import get_logger, log_analysis_step
 
 # Pipeline logger  
 _logger = get_logger("pipeline")
+
+_SCHEMA_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_authenticity_schema() -> Dict[str, Any]:
+    global _SCHEMA_CACHE
+    if _SCHEMA_CACHE is None:
+        schema_path = Path(__file__).resolve().parents[2] / "schemas" / "image_authenticity_report.schema.json"
+        _SCHEMA_CACHE = json.loads(schema_path.read_text())
+    return _SCHEMA_CACHE
+
+
+def _validate_report_schema(report: Dict[str, Any]) -> None:
+    schema = _load_authenticity_schema()
+    Draft7Validator(schema).validate(report)
 
 
 def _provenance_flags(meta: Dict[str, Any], c2pa_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -397,13 +414,30 @@ def analyze_single_image(
     log_analysis_step(_logger, "scoring", f"Scoring completed - final score: {score.suspicion_index}, bucket: {score.bucket_label}, evidence count: {len(score.evidence)}")
 
     # --- Assemble report dict ----------------------------------------------
+    forensics = {
+        "modules": modules,
+        "suspicion_index": score.suspicion_index,
+        "bucket_label": score.bucket_label,
+        "evidence": [e.to_dict() for e in score.evidence],
+        "notes": score.notes,
+    }
+    ml_signals = {"ai_detection": modules.get("ai_detection")} if modules.get("ai_detection") else None
+    decision = evaluate_decision(
+        provenance=prov,
+        watermark=watermark_report,
+        forensics=forensics,
+        ml_signals=ml_signals,
+    )
+
     result: Dict[str, Any] = _convert_to_serializable({
         "input": str(image_path),
         "sha256": intake["hashes"].get("sha256", loaded.sha256),
         "intake": intake,
-        "width": loaded.width,
-        "height": loaded.height,
-        "scale_factor": loaded.scale_factor,
+        "image": {
+            "width": loaded.width,
+            "height": loaded.height,
+            "scale_factor": loaded.scale_factor,
+        },
         "metadata": {
             "format": md.format,
             "size": md.size,
@@ -422,8 +456,12 @@ def analyze_single_image(
             "claims": c2pa_claims,
             "validation": c2pa_validation,
         },
+        "provenance": prov,
         "modules": modules,
         "watermark": watermark_report,
+        "forensics": forensics,
+        "ml_signals": ml_signals,
+        "decision": decision,
         "suspicion_index": score.suspicion_index,
         "bucket_label": score.bucket_label,
         "evidence": [e.to_dict() for e in score.evidence],
@@ -431,6 +469,8 @@ def analyze_single_image(
         "artifacts_dir": str(art_dir),
         "version": "0.1.0",
     })
+
+    _validate_report_schema(result)
 
     # --- Save JSON + PDF ----------------------------------------------------
     json_path = out_dir / f"{stem}_report.json"

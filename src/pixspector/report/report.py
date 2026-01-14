@@ -40,6 +40,17 @@ def save_pdf_report(
                           f"({data.get('bucket_label', '')})", styles["Normal"]))
     flow.append(Spacer(1, 0.5 * cm))
 
+    decision = data.get("decision", {})
+    decision_level = decision.get("confidence_level")
+    decision_rationale = decision.get("rationale") or []
+    if decision_level:
+        flow.append(Paragraph("<b>Decision</b>", styles["Heading2"]))
+        flow.append(Paragraph(f"<b>Confidence Level:</b> {decision_level}", styles["Normal"]))
+        if decision_rationale:
+            for item in decision_rationale:
+                flow.append(Paragraph(f"- {item}", styles["Normal"]))
+        flow.append(Spacer(1, 0.5 * cm))
+
     flow.append(Paragraph("<b>Evidence Items</b>", styles["Heading2"]))
     ev = data.get("evidence", [])
     if not ev:

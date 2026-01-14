@@ -22,6 +22,7 @@ out/
 reports/
 *.pdf
 *.json
+!schemas/*.json
 
 # IDE
 .vscode/
