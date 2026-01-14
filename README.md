@@ -5,6 +5,17 @@ It provides evidence visualizations, rule-based scoring, and generates PDF/JSON 
 
 ## Features
 
+- **Architecture:** See [docs/architecture.md](docs/architecture.md) for the full pipeline diagram and details.
+- **Pipeline stages (1–8):**
+  1. Image input (CLI/GUI)
+  2. Load & normalize
+  3. Metadata & C2PA checks
+  4. Concurrent forensic analyses
+  5. Provenance flags & module aggregation
+  6. Rule-based scoring (Suspicion Index)
+  7. Report assembly
+  8. Outputs (JSON/PDF/PNG artifacts)
+
 - **Provenance & metadata**
   - Extracts EXIF/XMP/IPTC, JPEG quantization tables, ICC profile  
   - Optional **C2PA** (Content Credentials) verification
