@@ -25,6 +25,7 @@ from .analysis.cfa import run_cfa_map
 from .analysis.prnu import run_prnu
 from .analysis.fft_checks import run_fft_checks
 from .analysis.ai_detection import run_ai_detection
+from .analysis.watermark import run_watermark_detection
 
 from .scoring.rules import score_image
 from .utils.visuals import (
@@ -313,9 +314,15 @@ def analyze_single_image(
             
         return "ai_detection", _convert_to_serializable(ai_detection.to_dict())
 
+    def run_watermark_task():
+        log_analysis_step(_logger, "watermark", "Starting watermark detection")
+        watermark_report = run_watermark_detection(rgb)
+        return "watermark", _convert_to_serializable(watermark_report.to_dict())
+
     # Execute analyses concurrently - optimize for performance
     analysis_tasks = [
         run_ai_detection_task,  # Prioritize AI detection
+        run_watermark_task,
         run_ela_task,
         run_resampling_task,
         run_cfa_task,
@@ -368,6 +375,7 @@ def analyze_single_image(
         } if c2pa_found or c2pa_valid else None,
     )
     modules["provenance"] = prov
+    watermark_report = modules.get("watermark", {})
 
     # --- Scoring ------------------------------------------------------------
     log_analysis_step(_logger, "scoring", "Starting scoring analysis")
@@ -415,6 +423,7 @@ def analyze_single_image(
             "validation": c2pa_validation,
         },
         "modules": modules,
+        "watermark": watermark_report,
         "suspicion_index": score.suspicion_index,
         "bucket_label": score.bucket_label,
         "evidence": [e.to_dict() for e in score.evidence],
