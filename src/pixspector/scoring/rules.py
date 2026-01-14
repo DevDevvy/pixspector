@@ -307,6 +307,62 @@ def score_image(
         add_evidence("provenance_c2pa_valid", -35.0, "C2PA manifest validates provenance.")
     if provenance.get("exif_consistent"):
         add_evidence("provenance_exif_consistent", -12.0, "EXIF structure consistent with camera capture.")
+    signature_status = str(provenance.get("c2pa_signature_status") or "").lower()
+    cert_status = str(provenance.get("c2pa_certificate_status") or "").lower()
+    timestamp_status = str(provenance.get("c2pa_timestamp_status") or "").lower()
+
+    if signature_status in {"invalid", "failed", "error"}:
+        add_evidence(
+            "provenance_signature_invalid",
+            18.0,
+            "C2PA signature validation failed.",
+        )
+    if cert_status in {"invalid", "failed", "error"}:
+        add_evidence(
+            "provenance_cert_chain_invalid",
+            14.0,
+            "C2PA certificate chain validation failed.",
+        )
+    if timestamp_status in {"invalid", "failed", "error"}:
+        add_evidence(
+            "provenance_timestamp_invalid",
+            10.0,
+            "C2PA RFC 3161 timestamp validation failed.",
+        )
+
+    ai_assertions = provenance.get("c2pa_ai_assertion") or []
+    if ai_assertions:
+        add_evidence(
+            "provenance_ai_assertion",
+            22.0,
+            "C2PA assertion indicates AI involvement in the content.",
+        )
+
+    claim_generator = provenance.get("c2pa_claim_generator")
+    software_agents = provenance.get("c2pa_software_agents") or []
+    actions = provenance.get("c2pa_actions") or []
+    provenance_text = " ".join(
+        str(item).lower()
+        for item in [claim_generator, *software_agents, *actions]
+        if item is not None
+    )
+    ai_tool_keywords = [
+        "stable diffusion",
+        "midjourney",
+        "dall",
+        "firefly",
+        "generative",
+        "sdxl",
+        "diffusion",
+        "dreamstudio",
+        "flux",
+    ]
+    if provenance_text and any(keyword in provenance_text for keyword in ai_tool_keywords):
+        add_evidence(
+            "provenance_ai_tool_reference",
+            16.0,
+            "C2PA provenance references an AI-capable tool.",
+        )
 
     # --- Final aggregation -------------------------------------------------
     base_score = sum(item.weight for item in evidence)
