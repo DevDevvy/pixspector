@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -44,10 +45,22 @@ _logger = get_logger("pipeline")
 def _provenance_flags(meta: Dict[str, Any], c2pa_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     exif_consistent = bool(meta.get("format")) and bool(meta.get("size"))
     c2pa_valid = False
-    if c2pa_result and c2pa_result.get("found") and c2pa_result.get("valid"):
-        c2pa_valid = True
+    c2pa_claims = {}
+    c2pa_validation = {}
+    if c2pa_result:
+        if c2pa_result.get("found") and c2pa_result.get("valid"):
+            c2pa_valid = True
+        c2pa_claims = c2pa_result.get("claims") or {}
+        c2pa_validation = c2pa_result.get("validation") or {}
     return {
         "c2pa_valid": c2pa_valid,
+        "c2pa_signature_status": c2pa_validation.get("signature", {}).get("status"),
+        "c2pa_certificate_status": c2pa_validation.get("certificate_chain", {}).get("status"),
+        "c2pa_timestamp_status": c2pa_validation.get("timestamp", {}).get("status"),
+        "c2pa_claim_generator": c2pa_claims.get("claimGenerator") or c2pa_claims.get("claimGeneratorInfo"),
+        "c2pa_software_agents": c2pa_claims.get("softwareAgent") or [],
+        "c2pa_actions": c2pa_claims.get("actions") or [],
+        "c2pa_ai_assertion": c2pa_claims.get("assertion_ai") or [],
         "exif_consistent": exif_consistent,
     }
 
@@ -105,6 +118,9 @@ def analyze_single_image(
     # --- Metadata & C2PA ----------------------------------------------------
     md = read_metadata(image_path)
     c2pa_raw = None
+    c2pa_claims = None
+    c2pa_validation = None
+    c2pa_manifest_store = None
     c2pa_found = False
     c2pa_valid = False
     if c2pa_mod.has_c2patool():
@@ -113,6 +129,27 @@ def analyze_single_image(
         c2pa_valid = c2pa_res.valid
         # keep raw json if not too large
         c2pa_raw = c2pa_res.raw_json if c2pa_res.raw_json and len(json.dumps(c2pa_res.raw_json)) < 200_000 else None
+        c2pa_claims = c2pa_res.claims
+        c2pa_validation = c2pa_res.validation
+        if c2pa_res.manifest_store_raw:
+            manifest_path = art_dir / "c2pa_manifest_store.bin"
+            manifest_path.write_bytes(c2pa_res.manifest_store_raw)
+            manifest_b64 = None
+            if len(c2pa_res.manifest_store_raw) < 200_000:
+                manifest_b64 = base64.b64encode(c2pa_res.manifest_store_raw).decode("ascii")
+            c2pa_manifest_store = {
+                "path": str(manifest_path),
+                "base64": manifest_b64,
+                "bytes": len(c2pa_res.manifest_store_raw),
+                "error": c2pa_res.manifest_store_error,
+            }
+        elif c2pa_res.manifest_store_error:
+            c2pa_manifest_store = {
+                "path": None,
+                "base64": None,
+                "bytes": None,
+                "error": c2pa_res.manifest_store_error,
+            }
     
     # Determine if image is JPEG format
     is_jpeg = md.format and md.format.upper() in ['JPEG', 'JPG']
@@ -326,6 +363,8 @@ def analyze_single_image(
         c2pa_result={
             "found": c2pa_found,
             "valid": c2pa_valid,
+            "claims": c2pa_claims,
+            "validation": c2pa_validation,
         } if c2pa_found or c2pa_valid else None,
     )
     modules["provenance"] = prov
@@ -371,6 +410,9 @@ def analyze_single_image(
             "found": c2pa_found,
             "valid": c2pa_valid,
             "raw": c2pa_raw,
+            "manifest_store": c2pa_manifest_store,
+            "claims": c2pa_claims,
+            "validation": c2pa_validation,
         },
         "modules": modules,
         "suspicion_index": score.suspicion_index,
