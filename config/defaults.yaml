@@ -7,6 +7,14 @@ app:
   max_image_dim: 4096 # images larger than this will be downscaled for analysis (aspect preserved)
   tile_size: 128 # default tile size for patch-based analyses
 
+sandbox:
+  enabled: true
+  max_file_size_mb: 50
+  max_decode_pixels: 50000000
+  max_memory_mb: 512
+  max_cpu_seconds: 5
+  worker_timeout_seconds: 10
+
 rules:
   # AI-focused weights based on research
   weights:

@@ -10,7 +10,7 @@ import concurrent.futures
 import cv2
 import numpy as np
 
-from .config import Config
+from .config import Config, SandboxConfig
 from .core.image_io import load_image, to_float32, ensure_color, LoadedImage
 from .core.metadata import read_metadata
 from .core import c2pa as c2pa_mod
@@ -87,7 +87,12 @@ def analyze_single_image(
     intake = evidence_mod.intake_file(image_path, out_dir)
 
     # --- Load ---------------------------------------------------------------
-    loaded: LoadedImage = load_image(image_path, max_dim=int(cfg.get("app.max_image_dim", 4096)))
+    sandbox_cfg = SandboxConfig.from_config(cfg)
+    loaded: LoadedImage = load_image(
+        image_path,
+        max_dim=int(cfg.get("app.max_image_dim", 4096)),
+        sandbox=sandbox_cfg,
+    )
     bgr = loaded.bgr
     rgb = loaded.rgb
     gray = loaded.gray
