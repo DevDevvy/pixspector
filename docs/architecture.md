@@ -18,6 +18,7 @@
     - ELA, JPEG ghosts, DCT/Benford
     - Resampling, CFA, PRNU, FFT
     - AI signal heuristics
+    - Watermark checks (SynthID, Stable Signature, Adobe CC)
         |
         v
 [5] Provenance flags & module aggregation
@@ -56,7 +57,7 @@
    - **Purpose:** Run core forensic modules in parallel for speed and coverage.
    - **Tools/APIs:** `run_ela`, `run_jpeg_ghosts`, `run_dct_benford`,
      `run_resampling_map`, `run_cfa_map`, `run_prnu`, `run_fft_checks`,
-     `run_ai_detection`; `ThreadPoolExecutor`.
+     `run_ai_detection`, `run_watermark_detection`; `ThreadPoolExecutor`.
    - **Outputs:** Module metrics plus visual artifacts (diff maps, curves, overlays).
 
 5. **Provenance flags & module aggregation**
@@ -68,6 +69,10 @@
    - **Purpose:** Convert evidence into a transparent, weighted score and bucket.
    - **Tools/APIs:** `score_image` with configurable weights/buckets.
    - **Outputs:** Suspicion Index (0–100), bucket label, evidence list, notes.
+   - **Watermark policy:** When a watermark hit is detected, it is treated as a
+     high-confidence provenance signal. High-confidence hits add strong evidence
+     even if other heuristic signals are weak, effectively augmenting (and in
+     practice overriding low-confidence decisions) in the final Suspicion Index.
 
 7. **Report assembly (JSON model + visuals)**
    - **Purpose:** Build the structured report payload and connect it to artifacts.

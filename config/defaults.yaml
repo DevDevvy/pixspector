@@ -26,6 +26,9 @@ rules:
     ai_pixel_distribution_moderate: 12
     ai_spectral_anomaly: 20
     ai_texture_inconsistency: 18
+    watermark_hit_high: 40
+    watermark_hit_moderate: 22
+    watermark_hit_low: 10
 
     # Traditional forensics (Secondary)
     ela_strong: 8

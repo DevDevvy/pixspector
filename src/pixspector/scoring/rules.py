@@ -364,6 +364,45 @@ def score_image(
             "C2PA provenance references an AI-capable tool.",
         )
 
+    # Watermark evidence (high-confidence provenance signal)
+    watermark = modules.get("watermark") or {}
+    watermark_hits = watermark.get("hits") or []
+    watermark_note = None
+    if isinstance(watermark_hits, list) and watermark_hits:
+        max_confidence = float(watermark.get("max_confidence", 0.0) or 0.0)
+        schemes = sorted(
+            {
+                str(hit.get("scheme_id"))
+                for hit in watermark_hits
+                if isinstance(hit, dict) and hit.get("scheme_id")
+            }
+        )
+        scheme_label = ", ".join(schemes) if schemes else "unknown scheme"
+        if max_confidence >= 0.8:
+            add_evidence(
+                "watermark_hit_high",
+                40.0,
+                f"High-confidence watermark detected ({scheme_label}).",
+                value=max_confidence,
+            )
+        elif max_confidence >= 0.5:
+            add_evidence(
+                "watermark_hit_moderate",
+                22.0,
+                f"Moderate-confidence watermark detected ({scheme_label}).",
+                value=max_confidence,
+            )
+        elif max_confidence >= 0.3:
+            add_evidence(
+                "watermark_hit_low",
+                10.0,
+                f"Low-confidence watermark detected ({scheme_label}).",
+                value=max_confidence,
+            )
+        watermark_note = (
+            f"Watermark hit(s) detected ({scheme_label}); treated as a high-confidence provenance signal."
+        )
+
     # --- Final aggregation -------------------------------------------------
     base_score = sum(item.weight for item in evidence)
     ai_boost = 0.0
@@ -398,6 +437,9 @@ def score_image(
             "AI detection module observed minor anomalies but below the confidence gate,"
             " so they were not factored into scoring."
         )
+
+    if watermark_note:
+        notes.append(watermark_note)
 
     if overall_ai_prob >= 0.75:
         notes.append("HIGH CONFIDENCE: Multiple AI generation signatures detected.")
