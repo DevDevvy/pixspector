@@ -11,14 +11,26 @@ from pixspector.core.image_io import load_image
 SAMPLES_DIR = Path("examples/sample_images")
 
 
+def _build_sample_cases() -> list[tuple[str, str]]:
+    cases: list[tuple[str, str]] = []
+    for entry in sorted(SAMPLES_DIR.iterdir()):
+        if not entry.is_file():
+            continue
+        lower_name = entry.name.lower()
+        if lower_name.startswith("ai"):
+            cases.append((entry.name, "ai"))
+        elif lower_name.startswith("real"):
+            cases.append((entry.name, "real"))
+    if not cases:
+        raise RuntimeError(
+            f"No sample images starting with 'ai' or 'real' found in {SAMPLES_DIR}."
+        )
+    return cases
+
+
 @pytest.mark.parametrize(
     ("filename", "expected_label"),
-    [
-        ("ai_photo.webp", "ai"),
-        ("ai_photo_2.webp", "ai"),
-        ("real_photo.jpg", "real"),
-        ("real_photo_2.JPG", "real"),
-    ],
+    _build_sample_cases(),
 )
 def test_sample_image_ai_detection(filename: str, expected_label: str) -> None:
     """Ensure bundled sample images are classified as expected."""
