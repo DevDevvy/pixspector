@@ -14,6 +14,7 @@ from .config import Config
 from .core.image_io import load_image, to_float32, ensure_color, LoadedImage
 from .core.metadata import read_metadata
 from .core import c2pa as c2pa_mod
+from .core import evidence as evidence_mod
 
 from .analysis.ela import run_ela
 from .analysis.jpeg_ghosts import run_jpeg_ghosts
@@ -82,6 +83,8 @@ def analyze_single_image(
     stem = image_path.stem
     art_dir = out_dir / f"{stem}_artifacts"
     art_dir.mkdir(parents=True, exist_ok=True)
+
+    intake = evidence_mod.intake_file(image_path, out_dir)
 
     # --- Load ---------------------------------------------------------------
     loaded: LoadedImage = load_image(image_path, max_dim=int(cfg.get("app.max_image_dim", 4096)))
@@ -344,7 +347,8 @@ def analyze_single_image(
     # --- Assemble report dict ----------------------------------------------
     result: Dict[str, Any] = _convert_to_serializable({
         "input": str(image_path),
-        "sha256": loaded.sha256,
+        "sha256": intake["hashes"].get("sha256", loaded.sha256),
+        "intake": intake,
         "width": loaded.width,
         "height": loaded.height,
         "scale_factor": loaded.scale_factor,
