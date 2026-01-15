@@ -53,9 +53,14 @@ def test_ai_component_gate_prevents_real_false_positive():
     gate = float(cfg.get("rules.ai_component_gate", 0.4))
 
     samples_dir = Path("examples/sample_images")
+    ai_samples = sorted(samples_dir.glob("ai_photo*"))
+    real_samples = sorted(samples_dir.glob("real_photo*"))
 
-    def score_sample(name: str) -> int:
-        img = load_image(samples_dir / name, max_dim=1024)
+    assert ai_samples, "Expected AI sample images prefixed with ai_photo"
+    assert real_samples, "Expected real sample images prefixed with real_photo"
+
+    def score_sample(path: Path) -> int:
+        img = load_image(path, max_dim=1024)
         ai_res = run_ai_detection(img.rgb)
         report = score_image(
             modules={"ai_detection": ai_res.to_dict()},
@@ -67,9 +72,12 @@ def test_ai_component_gate_prevents_real_false_positive():
         )
         return report.suspicion_index
 
-    ai_score = score_sample("ai_photo.webp")
-    real_score = score_sample("real_photo.jpg")
+    ai_scores = {sample.name: score_sample(sample) for sample in ai_samples}
+    real_scores = {sample.name: score_sample(sample) for sample in real_samples}
 
-    assert ai_score > real_score
-    assert real_score <= 25
-    assert ai_score >= 35
+    max_real = max(real_scores.values())
+    min_ai = min(ai_scores.values())
+
+    assert min_ai > max_real
+    assert max_real <= 25
+    assert min_ai >= 35
