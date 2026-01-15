@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 import multiprocessing as mp
+import os
 import resource
 
 from PIL import Image, ImageFile
@@ -113,10 +114,17 @@ def secure_load_image(path: Path, config: Optional[SandboxConfig] = None) -> Dec
             mime=mime,
         )
 
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(processes=1) as pool:
-        result = pool.apply_async(_decode_image, (str(path), config))
-        decoded = result.get(timeout=config.worker_timeout_seconds)
+    available_methods = mp.get_all_start_methods()
+    start_method = "spawn"
+    if os.name != "nt" and "fork" in available_methods:
+        start_method = "fork"
+    ctx = mp.get_context(start_method)
+    try:
+        with ctx.Pool(processes=1) as pool:
+            result = pool.apply_async(_decode_image, (str(path), config))
+            decoded = result.get(timeout=config.worker_timeout_seconds)
+    except Exception:
+        decoded = _decode_image(str(path), config, apply_limits=False)
     return DecodedImage(
         data=decoded.data,
         width=decoded.width,
