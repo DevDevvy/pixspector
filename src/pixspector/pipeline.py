@@ -91,6 +91,8 @@ def _convert_to_serializable(data: Any) -> Any:
         return {k: _convert_to_serializable(v) for k, v in data.items()}
     elif isinstance(data, list):
         return [_convert_to_serializable(v) for v in data]
+    elif isinstance(data, tuple):
+        return [_convert_to_serializable(v) for v in data]
     elif isinstance(data, np.ndarray):
         return data.tolist()
     elif isinstance(data, (np.float32, np.float64)):

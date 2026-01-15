@@ -29,7 +29,17 @@
       "type": "object",
       "properties": {
         "format": {"type": ["string", "null"]},
-        "size": {"type": ["integer", "null"]},
+        "size": {
+          "anyOf": [
+            {"type": ["integer", "null"]},
+            {
+              "type": "array",
+              "items": {"type": "integer", "minimum": 0},
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
         "icc_profile_present": {"type": ["boolean", "null"]},
         "icc_description": {"type": ["string", "null"]},
         "jpeg_subsampling": {"type": ["string", "null"]},
