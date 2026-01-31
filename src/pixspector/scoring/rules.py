@@ -59,11 +59,20 @@ def score_image(
     buckets_cfg: Dict[str, Any],
     ai_component_gate: float = 0.4,
 ) -> ScoreReport:
-    """Score an analysed image by combining AI indicators and classic forensic signals."""
+    """Score an analysed image by combining AI indicators and classic forensic signals.
+    
+    Handles missing modules gracefully to ensure scoring succeeds even with partial data.
+    """
 
     logger = get_logger("scoring")
     evidence: List[EvidenceItem] = []
     notes: List[str] = []
+
+    # Validate input
+    if not isinstance(modules, dict):
+        modules = {}
+        notes.append("Warning: Invalid module data provided to scoring engine.")
+        log_scoring_decision(logger, "validation", 0, "Invalid module data structure")
 
     def weight(key: str, default: float) -> float:
         return float(weights_cfg.get(key, default))

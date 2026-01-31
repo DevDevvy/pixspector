@@ -367,18 +367,32 @@ def analyze_single_image(
 
         # Collect results as they complete
         completed_count = 0
+        failed_count = 0
+        timeout_count = 0
+        
         for future in concurrent.futures.as_completed(future_to_task, timeout=300):  # 5 minute total timeout
             task_name = future_to_task[future]
             try:
-                module_name, result = future.result(timeout=30)  # 30 second timeout per analysis
+                module_name, result = future.result(timeout=60)  # 60 second timeout per analysis (increased from 30)
                 if result is not None:
                     modules[module_name] = result
                 completed_count += 1
                 log_analysis_step(_logger, "progress", f"Completed {module_name} ({completed_count}/{len(analysis_tasks)})")
             except concurrent.futures.TimeoutError:
-                log_analysis_step(_logger, "warning", f"Task {task_name} timed out")
+                timeout_count += 1
+                failed_count += 1
+                log_analysis_step(_logger, "warning", f"Task {task_name} timed out (continuing with other analyses)")
             except Exception as e:
-                log_analysis_step(_logger, "error", f"Task {task_name} failed: {str(e)}")
+                failed_count += 1
+                log_analysis_step(_logger, "error", f"Task {task_name} failed: {str(e)[:200]} (continuing with other analyses)")
+        
+        # Summary of analysis execution
+        if failed_count > 0:
+            log_analysis_step(_logger, "summary", 
+                f"Completed {completed_count} analyses, {failed_count} failed ({timeout_count} timeouts). "
+                f"Proceeding with available data.")
+        else:
+            log_analysis_step(_logger, "summary", f"All {completed_count} analyses completed successfully")
 
     # Provenance evidence flags (for scoring)
     prov = _provenance_flags(
@@ -396,6 +410,10 @@ def analyze_single_image(
     modules["provenance"] = prov
     watermark_report = modules.get("watermark", {})
 
+    # Validate we have minimum required data for scoring
+    if not modules:
+        log_analysis_step(_logger, "warning", "No analysis modules completed successfully - scoring may be limited")
+    
     # --- Scoring ------------------------------------------------------------
     log_analysis_step(_logger, "scoring", "Starting scoring analysis")
     log_analysis_step(_logger, "modules_available", f"Available modules for scoring: {list(modules.keys())}")

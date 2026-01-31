@@ -87,6 +87,33 @@ def _read_icc_and_jpeg_info(path: Path):
 
 
 def read_metadata(path: Path) -> Metadata:
+    """
+    Extract comprehensive metadata from an image file.
+    
+    Args:
+        path: Path to image file
+    
+    Returns:
+        Metadata object with EXIF, ICC, JPEG info
+    
+    Note:
+        Fails gracefully - returns empty/None values if extraction fails
+    """
+    if not isinstance(path, Path):
+        path = Path(path)
+    
+    if not path.exists():
+        # Return empty metadata rather than raising
+        return Metadata(
+            exif={},
+            icc_profile_present=False,
+            icc_description=None,
+            jpeg_subsampling=None,
+            jpeg_quant_tables=None,
+            format="unknown",
+            size=(0, 0),
+        )
+    
     exif = _read_exif(path)
     icc_present, icc_desc, subsampling, qtables, fmt, size = _read_icc_and_jpeg_info(path)
     return Metadata(

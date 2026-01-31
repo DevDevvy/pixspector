@@ -95,9 +95,43 @@ def _decode_image(path_str: str, config: SandboxConfig, apply_limits: bool = Tru
 
 
 def secure_load_image(path: Path, config: Optional[SandboxConfig] = None) -> DecodedImage:
+    """
+    Load and decode an image with sandbox restrictions for security.
+    
+    Args:
+        path: Path to image file
+        config: Optional sandbox configuration (uses defaults if None)
+    
+    Returns:
+        DecodedImage with decoded image data
+    
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If file exceeds size limits or is invalid format
+        RuntimeError: If image decoding fails
+    """
+    if not isinstance(path, Path):
+        path = Path(path)
+        
     if not path.exists():
-        raise FileNotFoundError(path)
+        raise FileNotFoundError(f"Image file not found: {path}")
+    
     config = config or SandboxConfig()
+    
+    # Validate file size before reading
+    try:
+        _enforce_file_size(path, config.max_file_size_mb)
+    except ValueError as e:
+        raise ValueError(f"File size validation failed for {path.name}: {str(e)}")
+    
+    # Validate file type via magic bytes
+    try:
+        header = _read_header(path, size=64)
+        detected_mime = _sniff_magic(header)
+        if detected_mime is None:
+            raise ValueError(f"Unsupported or unrecognized image format: {path.name}")
+    except Exception as e:
+        raise ValueError(f"Failed to read file header for {path.name}: {str(e)}")
     _enforce_file_size(path, config.max_file_size_mb)
     header = _read_header(path)
     mime = _sniff_magic(header)

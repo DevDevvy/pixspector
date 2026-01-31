@@ -16,16 +16,53 @@ class Config:
 
     @classmethod
     def load(cls, defaults_path: Path, override_path: Optional[Path] = None) -> "Config":
-        base = _read_yaml(defaults_path)
+        """Load configuration from YAML files with validation.
+        
+        Args:
+            defaults_path: Path to default config YAML
+            override_path: Optional path to override config YAML
+        
+        Returns:
+            Config object
+        
+        Raises:
+            FileNotFoundError: If defaults_path doesn't exist
+            ValueError: If YAML is invalid
+        """
+        if not defaults_path.exists():
+            raise FileNotFoundError(f"Config file not found: {defaults_path}")
+        
+        try:
+            base = _read_yaml(defaults_path)
+        except Exception as e:
+            raise ValueError(f"Failed to parse config {defaults_path}: {e}")
+        
         src = defaults_path
         if override_path:
-            over = _read_yaml(override_path)
-            base = _deep_update(base, over)
-            src = override_path
+            if not override_path.exists():
+                raise FileNotFoundError(f"Override config not found: {override_path}")
+            try:
+                over = _read_yaml(override_path)
+                base = _deep_update(base, over)
+                src = override_path
+            except Exception as e:
+                raise ValueError(f"Failed to parse override config {override_path}: {e}")
+        
         return cls(data=base, source_path=src)
 
     def get(self, dotted_key: str, default: Any = None) -> Any:
-        """Fetch nested values with dotted keys e.g. 'modules.ela.recompress_quality'."""
+        """Fetch nested values with dotted keys e.g. 'modules.ela.recompress_quality'.
+        
+        Args:
+            dotted_key: Dot-separated key path (e.g., "modules.ela.quality")
+            default: Default value if key not found
+        
+        Returns:
+            Value at key path or default
+        """
+        if not isinstance(dotted_key, str) or not dotted_key:
+            return default
+        
         cur: Any = self.data
         for part in dotted_key.split("."):
             if not isinstance(cur, dict) or part not in cur:
