@@ -36,5 +36,7 @@ def test_analyze_single(tmp_path: Path):
     # check artifacts
     json_path = out / f"{img.stem}_report.json"
     assert json_path.exists()
-    # summary table mentions JSON file name
-    assert f"{img.stem}_report.json" in res.stdout
+    # Check that analysis results table is present
+    assert "Analysis Results" in res.stdout
+    # Check that summary panel with success message is present
+    assert "All analyses completed successfully" in res.stdout or "Successful: 1" in res.stdout

@@ -162,38 +162,43 @@ def analyze(
     continue_on_error: bool = typer.Option(True, "--continue", help="Continue processing other images if one fails."),
 ) -> None:
     """
-    Run the full classical forensic pipeline on one or many images.
-    Supports batch processing with robust error handling.
+    Analyze images for manipulation, AI generation, and authenticity.
     """
+    print_logo(console, show_tagline=False)
+    console.print()
+    print_section_header(console, "Forensic Analysis Pipeline", "🔍")
+    console.print()
     # Validate output directory
     try:
         _ensure_outdir(report)
     except PermissionError:
-        console.print(f"[red]Error: Permission denied creating output directory: {report}[/]")
+        print_error(console, f"Permission denied creating output directory: {report}")
         raise typer.Exit(code=1)
     except Exception as e:
-        console.print(f"[red]Error creating output directory {report}: {e}[/]")
+        print_error(console, f"Error creating output directory {report}: {e}")
         raise typer.Exit(code=1)
 
     # Validate max_size_mb
     if max_size_mb < 0:
-        console.print("[red]Error: --max-size must be non-negative (0 = unlimited)[/]")
+        print_error(console, "--max-size must be non-negative (0 = unlimited)")
         raise typer.Exit(code=1)
 
     # Load configuration with error handling
     try:
         defaults_path = find_defaults_path(Path(__file__))
     except FileNotFoundError:
-        console.print("[red]defaults.yaml not found. Did you create the repo via the bootstrap script?[/]")
+        print_error(console, "defaults.yaml not found. Did you create the repo via the bootstrap script?")
         raise typer.Exit(code=1)
     
     try:
         cfg = Config.load(defaults_path=defaults_path, override_path=config)
+        print_success(console, f"Configuration loaded from {defaults_path.name}")
     except Exception as e:
-        console.print(f"[red]Error loading configuration: {e}[/]")
+        print_error(console, f"Error loading configuration: {e}")
         raise typer.Exit(code=1)
 
     # Expand globs with validation
+    console.print("[dim]Scanning for images...[/dim]")
     paths: List[str] = []
     if any(ch in src for ch in ["*", "?", "[", "]"]):
         paths = sorted(glob.glob(src))
@@ -201,7 +206,7 @@ def analyze(
         paths = [src]
 
     if not paths:
-        console.print("[red]No files matched.[/]")
+        print_error(console, "No files matched the pattern")
         raise typer.Exit(code=1)
 
     # Validate and filter paths
@@ -214,18 +219,18 @@ def analyze(
         
         if not pth.exists():
             skipped["not_found"] += 1
-            console.print(f"[yellow]Skip (not found):[/] {p}")
+            console.print(f"[dim]  ⊘ Skip: {p} (not found)[/dim]")
             continue
             
         if not pth.is_file():
             skipped["not_file"] += 1
-            console.print(f"[yellow]Skip (not a file):[/] {p}")
+            console.print(f"[dim]  ⊘ Skip: {p} (not a file)[/dim]")
             continue
         
         # Check file extension
         if pth.suffix.lower() not in valid_extensions:
             skipped["unsupported"] += 1
-            console.print(f"[yellow]Skip (unsupported format):[/] {pth.name}")
+            console.print(f"[dim]  ⊘ Skip: {pth.name} (unsupported format)[/dim]")
             continue
         
         # Check file size
@@ -233,75 +238,107 @@ def analyze(
             size_mb = pth.stat().st_size / (1024 * 1024)
             if size_mb > max_size_mb:
                 skipped["too_large"] += 1
-                console.print(f"[yellow]Skip (too large: {size_mb:.1f} MB):[/] {pth.name}")
+                console.print(f"[dim]  ⊘ Skip: {pth.name} (too large: {size_mb:.1f} MB)[/dim]")
                 continue
         
         validated_paths.append(pth)
     
     if not validated_paths:
-        console.print("[red]No valid image files to process.[/]")
+        print_error(console, "No valid image files to process")
         if sum(skipped.values()) > 0:
-            console.print(f"Skipped: {skipped['not_found']} not found, {skipped['not_file']} not files, "
-                        f"{skipped['too_large']} too large, {skipped['unsupported']} unsupported format")
+            console.print(f"[yellow]Skipped: {skipped['not_found']} not found, {skipped['not_file']} not files, "
+                        f"{skipped['too_large']} too large, {skipped['unsupported']} unsupported[/yellow]")
         raise typer.Exit(code=1)
     
-    console.print(f"[green]Processing {len(validated_paths)} valid images...[/]")
+    console.print()
+    print_success(console, f"Found {len(validated_paths)} valid image(s) to analyze")
     if sum(skipped.values()) > 0:
-        console.print(f"[yellow]Skipped {sum(skipped.values())} files[/]")
+        print_warning(console, f"Skipped {sum(skipped.values())} invalid files")
+    console.print()
 
-    table = Table(title="pixspector — results")
-    table.add_column("Image")
-    table.add_column("Suspicion")
-    table.add_column("Bucket")
-    table.add_column("JSON")
-    table.add_column("PDF")
-    table.add_column("Status")
+    table = Table(
+        title=f"[bold cyan]Analysis Results[/bold cyan]",
+        box=box.ROUNDED,
+        border_style="cyan",
+        header_style="bold cyan",
+        show_lines=False
+    )
+    table.add_column("Image", style="bold white", no_wrap=True)
+    table.add_column("Suspicion", justify="center", width=10)
+    table.add_column("Bucket", justify="center", width=10)
+    table.add_column("Reports", style="dim")
+    table.add_column("Status", justify="center", width=8)
 
     success_count = 0
     error_count = 0
     
     for idx, pth in enumerate(validated_paths, 1):
-        console.print(f"\n[cyan]Processing {idx}/{len(validated_paths)}: {pth.name}[/]")
+        console.print(f"[cyan]▶[/cyan] [{idx}/{len(validated_paths)}] Analyzing [bold]{pth.name}[/bold]...")
         
         try:
             res = analyze_single_image(pth, cfg=cfg, out_dir=report, want_pdf=(not no_pdf))
             json_name = f"{pth.stem}_report.json"
-            pdf_name = f"{pth.stem}_report.pdf" if not no_pdf else "-"
+            pdf_info = f"+ PDF" if not no_pdf else ""
+            
+            suspicion = res.get("suspicion_index", 0)
+            bucket = res.get("bucket_label", "Unknown")
+            
             table.add_row(
                 pth.name,
-                str(res.get("suspicion_index", "n/a")),
-                str(res.get("bucket_label", "")),
-                json_name,
-                pdf_name,
-                "[green]✓[/]"
+                get_suspicion_badge(suspicion),
+                get_bucket_badge(bucket),
+                f"JSON {pdf_info}",
+                "[green]✓[/green]"
             )
             success_count += 1
+            print_success(console, f"Completed {pth.name}")
         except KeyboardInterrupt:
-            console.print("\n[yellow]Processing interrupted by user.[/]")
+            console.print("\n[yellow]⚠ Processing interrupted by user[/yellow]")
             break
         except Exception as e:
             error_count += 1
-            error_msg = str(e)[:100]  # Truncate long error messages
-            console.print(f"[red]Error analyzing {pth.name}:[/] {error_msg}")
+            error_msg = str(e)[:80]
+            print_error(console, f"{pth.name}: {error_msg}")
             table.add_row(
                 pth.name,
-                "ERROR",
-                "-",
-                "-",
-                "-",
-                "[red]✗[/]"
+                "[dim]--[/dim]",
+                "[dim]--[/dim]",
+                "[red]Failed[/red]",
+                "[red]✗[/red]"
             )
             if not continue_on_error:
-                console.print("[yellow]Stopping due to error (use --continue to process remaining files)[/]")
+                print_warning(console, "Stopping due to error (use --continue to process remaining files)")
                 break
+        console.print()
 
-    console.print("\n")
+    console.print()
     console.print(table)
-    console.print(Panel.fit(
-        f"Results:\n"
-        f"  ✓ Successful: {success_count}\n"
-        f"  ✗ Failed: {error_count}\n"
-        f"  Artifacts: {report.resolve()}"
+    console.print()
+    
+    # Final summary
+    if error_count == 0:
+        status_color = "green"
+        status_icon = "✓"
+        status_text = "All analyses completed successfully!"
+    elif success_count > 0:
+        status_color = "yellow"
+        status_icon = "⚠"
+        status_text = "Analysis completed with some errors"
+    else:
+        status_color = "red"
+        status_icon = "✗"
+        status_text = "Analysis failed"
+    
+    console.print(Panel(
+        f"[bold {status_color}]{status_icon} {status_text}[/bold {status_color}]\n\n"
+        f"[bold]Results:[/bold]\n"
+        f"  [green]✓[/green] Successful: {success_count}\n"
+        f"  [red]✗[/red] Failed: {error_count}\n\n"
+        f"[bold]Output:[/bold]\n"
+        f"  [cyan]{report.resolve()}[/cyan]",
+        title="[bold]Summary[/bold]",
+        border_style=status_color,
+        box=box.ROUNDED
     ))
     
     if error_count > 0 and success_count > 0:
@@ -316,25 +353,32 @@ def summarize(
     sort_by: str = typer.Option("suspicion", "--sort", "-s", help="Sort by: suspicion, name, bucket"),
 ) -> None:
     """
-    Summarize multiple analysis reports from a directory.
+    Generate a summary report from multiple analysis results.
     """
+    print_logo(console, show_tagline=False)
+    console.print()
+    print_section_header(console, "Report Summary", "📊")
+    console.print()
+    
     if not report_dir.exists():
-        console.print(f"[red]Directory not found: {report_dir}[/]")
+        print_error(console, f"Directory not found: {report_dir}")
         raise typer.Exit(code=1)
     
     if not report_dir.is_dir():
-        console.print(f"[red]Not a directory: {report_dir}[/]")
+        print_error(console, f"Not a directory: {report_dir}")
         raise typer.Exit(code=1)
     
     # Find all JSON reports
+    console.print("[dim]Scanning for report files...[/dim]")
     report_files = list(report_dir.glob("*_report.json"))
     
     if not report_files:
-        console.print(f"[yellow]No report files found in {report_dir}[/]")
-        console.print("Report files should match pattern: *_report.json")
+        print_warning(console, f"No report files found in {report_dir}")
+        console.print("[dim]Report files should match pattern: *_report.json[/dim]")
         raise typer.Exit(code=0)
     
-    console.print(f"[cyan]Found {len(report_files)} report(s)[/]\n")
+    print_success(console, f"Found {len(report_files)} report(s)")
+    console.print()
     
     # Load and parse reports
     reports = []
@@ -351,10 +395,10 @@ def summarize(
                     "evidence_count": len(data.get("evidence", [])),
                 })
         except Exception as e:
-            console.print(f"[yellow]Warning: Could not parse {rfile.name}: {e}[/]")
+            print_warning(console, f"Could not parse {rfile.name}: {str(e)[:60]}")
     
     if not reports:
-        console.print("[red]No valid reports could be loaded[/]")
+        print_error(console, "No valid reports could be loaded")
         raise typer.Exit(code=1)
     
     # Sort reports
@@ -366,28 +410,32 @@ def summarize(
         reports.sort(key=lambda x: (x["bucket"], -x["suspicion"]))
     
     # Display summary table
-    table = Table(title=f"Analysis Summary ({len(reports)} images)")
-    table.add_column("Image", style="cyan")
-    table.add_column("Suspicion", justify="right")
-    table.add_column("Bucket")
-    table.add_column("Format")
-    table.add_column("Dimensions")
-    table.add_column("Evidence")
-    
-    bucket_colors = {"High": "red", "Medium": "yellow", "Low": "green"}
+    table = Table(
+        title=f"[bold cyan]Analysis Summary[/bold cyan] [dim]({len(reports)} images)[/dim]",
+        box=box.ROUNDED,
+        border_style="cyan",
+        header_style="bold cyan",
+        show_lines=False
+    )
+    table.add_column("Image", style="bold white")
+    table.add_column("Suspicion", justify="center", width=10)
+    table.add_column("Bucket", justify="center", width=10)
+    table.add_column("Format", justify="center", width=8)
+    table.add_column("Size", justify="right", width=12)
+    table.add_column("Evidence", justify="center", width=10)
     
     for rep in reports:
-        bucket_style = bucket_colors.get(rep["bucket"], "white")
         table.add_row(
             rep["file"],
-            str(rep["suspicion"]),
-            f"[{bucket_style}]{rep['bucket']}[/]",
-            rep["format"],
-            rep["dimensions"],
-            str(rep["evidence_count"]),
+            get_suspicion_badge(rep["suspicion"]),
+            get_bucket_badge(rep["bucket"]),
+            f"[cyan]{rep['format']}[/cyan]",
+            f"[dim]{rep['dimensions']}[/dim]",
+            f"[yellow]{rep['evidence_count']}[/yellow]",
         )
     
     console.print(table)
+    console.print()
     
     # Statistics
     avg_suspicion = sum(r["suspicion"] for r in reports) / len(reports)
@@ -395,9 +443,27 @@ def summarize(
     for r in reports:
         bucket_counts[r["bucket"]] = bucket_counts.get(r["bucket"], 0) + 1
     
-    console.print(f"\n[bold]Statistics:[/]")
-    console.print(f"  Average suspicion: {avg_suspicion:.1f}")
-    console.print(f"  Bucket distribution:")
-    for bucket, count in sorted(bucket_counts.items(), key=lambda x: -x[1]):
-        pct = 100 * count / len(reports)
-        console.print(f"    {bucket}: {count} ({pct:.1f}%)")
+    # Create stats summary
+    stats_text = f"[bold]Overall Statistics:[/bold]\n\n"
+    stats_text += f"  Average Suspicion: [cyan]{avg_suspicion:.1f}[/cyan]\n\n"
+    stats_text += f"[bold]Risk Distribution:[/bold]\n"
+    
+    for bucket in ["High", "Medium", "Low"]:
+        count = bucket_counts.get(bucket, 0)
+        pct = 100 * count / len(reports) if reports else 0
+        if bucket == "High":
+            color = "red"
+        elif bucket == "Medium":
+            color = "yellow"
+        else:
+            color = "green"
+        bar_length = int(pct / 5)  # Scale to 20 char max
+        bar = "█" * bar_length
+        stats_text += f"  [{color}]{bucket:8}[/{color}] [{color}]{bar}[/{color}] {count:3d} [dim]({pct:5.1f}%)[/dim]\n"
+    
+    console.print(Panel(
+        stats_text,
+        title="[bold]Summary Statistics[/bold]",
+        border_style="cyan",
+        box=box.ROUNDED
+    ))

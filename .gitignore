@@ -16,7 +16,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-
+CHANGELOG.md
 # Reports & outputs
 out/
 reports/
