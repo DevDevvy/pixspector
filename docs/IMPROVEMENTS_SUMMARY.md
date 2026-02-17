@@ -192,3 +192,12 @@ The project has been significantly improved with:
 - **Better maintainability** via documentation and code quality
 
 All changes maintain backward compatibility while providing substantial improvements in user experience and system robustness.
+
+## Latest Update (Watermark Completion)
+
+- ✅ Implemented non-stub watermark detection with spectral periodicity heuristics.
+- ✅ Added dedicated watermark tests to prevent regressions.
+- ✅ Documented probabilistic interpretation guidance in README and architecture docs.
+
+This closes the previously unfinished watermark detector work and improves provenance scoring quality.
+
