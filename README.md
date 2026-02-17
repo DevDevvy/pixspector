@@ -3,6 +3,8 @@
 **pixspector** is a classical, explainable **image forensics toolkit** — no machine learning involved.  
 It provides evidence visualizations, rule-based scoring, and generates PDF/JSON reports, all offline.
 
+> Note: Watermark and AI-origin modules are heuristic signals meant to support provenance assessment, not definitive attribution by themselves.
+
 ## Features
 
 - **Architecture:** See [docs/architecture.md](docs/architecture.md) for the full pipeline diagram and details.
@@ -28,6 +30,7 @@ It provides evidence visualizations, rule-based scoring, and generates PDF/JSON 
   - **CFA/demosaicing** consistency
   - **PRNU residuals** (sensor noise fingerprinting)
   - **FFT checks** (periodic peaks, high-frequency rolloff)
+  - **Watermark heuristics** for SynthID / Stable Signature / Adobe CC style periodic signals
 
 - **Scoring**
   - Transparent, rule-based **Suspicion Index (0–100)**

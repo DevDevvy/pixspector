@@ -18,7 +18,7 @@
     - ELA, JPEG ghosts, DCT/Benford
     - Resampling, CFA, PRNU, FFT
     - AI signal heuristics
-    - Watermark checks (SynthID, Stable Signature, Adobe CC)
+    - Watermark heuristics (SynthID, Stable Signature, Adobe CC-style periodicity checks)
         |
         v
 [5] Provenance flags & module aggregation
@@ -69,10 +69,10 @@
    - **Purpose:** Convert evidence into a transparent, weighted score and bucket.
    - **Tools/APIs:** `score_image` with configurable weights/buckets.
    - **Outputs:** Suspicion Index (0–100), bucket label, evidence list, notes.
-   - **Watermark policy:** When a watermark hit is detected, it is treated as a
-     high-confidence provenance signal. High-confidence hits add strong evidence
-     even if other heuristic signals are weak, effectively augmenting (and in
-     practice overriding low-confidence decisions) in the final Suspicion Index.
+   - **Watermark policy:** Watermark detectors are heuristic and probabilistic.
+     High-confidence hits are treated as positive provenance evidence and can
+     materially reduce suspicion, but should be interpreted alongside metadata,
+     C2PA signals, and other forensic modules.
 
 7. **Report assembly (JSON model + visuals)**
    - **Purpose:** Build the structured report payload and connect it to artifacts.
